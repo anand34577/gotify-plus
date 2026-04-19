@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Don't back up the database — it contains auth tokens -->
+        <exclude domain="database" path="gotify.db" />
+        <!-- DataStore preferences can be restored -->
+        <include domain="file" path="datastore" />
+    </cloud-backup>
+</data-extraction-rules>
