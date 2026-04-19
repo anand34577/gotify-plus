@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gotify+</string>
+    <string name="notification_channel_foreground">Background connection</string>
+    <string name="notification_channel_default">Gotify notifications</string>
+    <string name="service_running">Gotify is connected</string>
+</resources>

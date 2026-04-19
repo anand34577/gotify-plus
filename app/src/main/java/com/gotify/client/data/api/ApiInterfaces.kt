@@ -1,0 +1,151 @@
+package com.gotify.client.data.api
+
+import com.gotify.client.data.model.*
+import okhttp3.MultipartBody
+import retrofit2.Response
+import retrofit2.http.*
+
+
+
+interface AuthApi {
+
+    
+    @POST("client")
+    suspend fun createClient(
+        @Body request: LoginRequest,
+        @Header("Authorization") basicAuth: String
+    ): Response<ClientResponse>
+
+    
+    @DELETE("client/{id}")
+    suspend fun deleteClient(
+        @Path("id") clientId: Int
+    ): Response<Unit>
+
+    
+    @GET("client")
+    suspend fun getClients(): Response<List<ClientResponse>>
+}
+
+
+
+interface MessageApi {
+
+    
+    @GET("message")
+    suspend fun getMessages(
+        @Query("limit") limit: Int = 100,
+        @Query("since") since: Long? = null
+    ): Response<PagedMessages>
+
+    
+    @GET("application/{appId}/message")
+    suspend fun getMessagesByApp(
+        @Path("appId")  appId: Int,
+        @Query("limit") limit: Int = 100,
+        @Query("since") since: Long? = null
+    ): Response<PagedMessages>
+
+    
+    @DELETE("message/{id}")
+    suspend fun deleteMessage(
+        @Path("id") messageId: Long
+    ): Response<Unit>
+
+    
+    @DELETE("message")
+    suspend fun deleteAllMessages(): Response<Unit>
+
+    
+    @DELETE("application/{appId}/message")
+    suspend fun deleteMessagesByApp(
+        @Path("appId") appId: Int
+    ): Response<Unit>
+}
+
+
+
+interface ApplicationApi {
+
+    
+    @GET("application")
+    suspend fun getApplications(): Response<List<GotifyApplication>>
+
+    
+    @POST("application")
+    suspend fun createApplication(
+        @Body request: CreateApplicationRequest
+    ): Response<GotifyApplication>
+
+    
+    @PUT("application/{id}")
+    suspend fun updateApplication(
+        @Path("id")   appId: Int,
+        @Body request: CreateApplicationRequest
+    ): Response<GotifyApplication>
+
+    
+    @DELETE("application/{id}")
+    suspend fun deleteApplication(
+        @Path("id") appId: Int
+    ): Response<Unit>
+
+    
+    @Multipart
+    @POST("application/{id}/image")
+    suspend fun uploadApplicationImage(
+        @Path("id")   appId: Int,
+        @Part         image: MultipartBody.Part
+    ): Response<GotifyApplication>
+}
+
+
+
+interface UserApi {
+
+    
+    @GET("user")
+    suspend fun getUsers(): Response<List<GotifyUser>>
+
+    
+    @GET("user/current")
+    suspend fun getCurrentUser(): Response<GotifyUser>
+
+    
+    @POST("user")
+    suspend fun createUser(
+        @Body request: CreateUserRequest
+    ): Response<GotifyUser>
+
+    
+    @GET("user/{id}")
+    suspend fun getUser(
+        @Path("id") userId: Int
+    ): Response<GotifyUser>
+
+    
+    @POST("user/{id}")
+    suspend fun updateUser(
+        @Path("id")   userId: Int,
+        @Body request: UpdateUserRequest
+    ): Response<GotifyUser>
+
+    
+    @DELETE("user/{id}")
+    suspend fun deleteUser(
+        @Path("id") userId: Int
+    ): Response<Unit>
+}
+
+
+
+interface ServerApi {
+
+    
+    @GET("version")
+    suspend fun getVersion(): Response<VersionInfo>
+
+    
+    @GET("health")
+    suspend fun getHealth(): Response<HealthResponse>
+}
