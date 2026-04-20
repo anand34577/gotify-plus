@@ -67,7 +67,7 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 1. Clone the repository
    
    ```bash
-   git clone https://github.com/your-username/gotify-plus.git
+   git clone https://github.com/anand34577/gotify-plus.git
    cd gotify-plus
    ```
 
