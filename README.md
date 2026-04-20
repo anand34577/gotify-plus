@@ -8,14 +8,15 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 
 <p align="center">
   <img src="app/images/login.png" alt="Login" width="250">
-  <img src="app/images/settings.png" alt="Settings" width="250">
-  <img src="app/images/application.png" alt="Application" width="250">
-</p>
-
-<p align="center">
   <img src="app/images/messages.png" alt="Messages" width="250">
   <img src="app/images/messages_selected.png" alt="Messages Selected" width="250">
+  
+</p>
+</br>
+<p align="center">
+  <img src="app/images/application.png" alt="Application" width="250">
   <img src="app/images/add_new_application.png" alt="Add New Application" width="250">
+  <img src="app/images/settings.png" alt="Settings" width="250">
 </p>
 
 ## Features
