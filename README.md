@@ -6,13 +6,17 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 
 ## Screenshots
 
-![Settings](app/images/settings.png)
-![Add New Application](app/images/add_new_application.png)
-![Application](app/images/application.png)
-![Login](app/images/login.png)
-![Messages](app/images/messages.png)
-![Messages Selected](app/images/messages_selected.png)
+<p align="center">
+  <img src="app/images/login.png" alt="Login" width="250">
+  <img src="app/images/settings.png" alt="Settings" width="250">
+  <img src="app/images/application.png" alt="Application" width="250">
+</p>
 
+<p align="center">
+  <img src="app/images/messages.png" alt="Messages" width="250">
+  <img src="app/images/messages_selected.png" alt="Messages Selected" width="250">
+  <img src="app/images/add_new_application.png" alt="Add New Application" width="250">
+</p>
 ---
 
 ## Features
@@ -35,18 +39,18 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 
 ## Tech Stack
 
-| Layer | Library |
-|---|---|
-| UI | Jetpack Compose + Material 3 |
-| Architecture | MVVM + Clean Architecture |
-| Dependency Injection | Hilt |
-| Networking | Retrofit 2 + OkHttp 4 |
-| Real-time | OkHttp WebSocket |
-| Local DB | Room |
-| Preferences | DataStore |
-| Image loading | Coil |
-| Async | Kotlin Coroutines + Flow |
-| Markdown | compose-markdown |
+| Layer                | Library                      |
+| -------------------- | ---------------------------- |
+| UI                   | Jetpack Compose + Material 3 |
+| Architecture         | MVVM + Clean Architecture    |
+| Dependency Injection | Hilt                         |
+| Networking           | Retrofit 2 + OkHttp 4        |
+| Real-time            | OkHttp WebSocket             |
+| Local DB             | Room                         |
+| Preferences          | DataStore                    |
+| Image loading        | Coil                         |
+| Async                | Kotlin Coroutines + Flow     |
+| Markdown             | compose-markdown             |
 
 ---
 
@@ -62,6 +66,7 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 ### Build from source
 
 1. Clone the repository
+   
    ```bash
    git clone https://github.com/your-username/gotify-plus.git
    cd gotify-plus
@@ -117,45 +122,45 @@ app/
 
 ## Notification Priority Mapping
 
-| Gotify priority | Android behaviour |
-|---|---|
-| 0 | No notification |
-| 1 – 3 | Silent (IMPORTANCE_LOW) |
-| 4 – 7 | Sound (IMPORTANCE_DEFAULT) |
-| 8 – 10 | Sound + optional vibration (IMPORTANCE_HIGH) |
+| Gotify priority | Android behaviour                            |
+| --------------- | -------------------------------------------- |
+| 0               | No notification                              |
+| 1 – 3           | Silent (IMPORTANCE_LOW)                      |
+| 4 – 7           | Sound (IMPORTANCE_DEFAULT)                   |
+| 8 – 10          | Sound + optional vibration (IMPORTANCE_HIGH) |
 
 ---
 
 ## Gotify API Coverage
 
-| Endpoint | Used for |
-|---|---|
-| `POST /client` | Create client token on login |
-| `DELETE /client/{id}` | Revoke token on logout |
-| `GET /user/current` | Validate manual token |
-| `GET /message` | Fetch + paginate all messages |
-| `DELETE /message/{id}` | Delete single message |
-| `DELETE /message` | Delete all messages |
-| `GET /application` | List applications |
-| `POST /application` | Create application |
-| `DELETE /application/{id}` | Delete application |
-| `DELETE /application/{id}/message` | Clear app messages |
-| `GET /stream` | WebSocket — real-time message stream |
-| `GET /version` | Verify server reachability |
+| Endpoint                           | Used for                             |
+| ---------------------------------- | ------------------------------------ |
+| `POST /client`                     | Create client token on login         |
+| `DELETE /client/{id}`              | Revoke token on logout               |
+| `GET /user/current`                | Validate manual token                |
+| `GET /message`                     | Fetch + paginate all messages        |
+| `DELETE /message/{id}`             | Delete single message                |
+| `DELETE /message`                  | Delete all messages                  |
+| `GET /application`                 | List applications                    |
+| `POST /application`                | Create application                   |
+| `DELETE /application/{id}`         | Delete application                   |
+| `DELETE /application/{id}/message` | Clear app messages                   |
+| `GET /stream`                      | WebSocket — real-time message stream |
+| `GET /version`                     | Verify server reachability           |
 
 ---
 
 ## Permissions
 
-| Permission | Reason |
-|---|---|
-| `INTERNET` | Server communication |
-| `FOREGROUND_SERVICE` | Keep WebSocket alive in background |
-| `POST_NOTIFICATIONS` | Show push notifications (Android 13+) |
-| `RECEIVE_BOOT_COMPLETED` | Restart listener after reboot |
-| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Reliable background delivery |
-| `VIBRATE` | High-priority notification vibration |
-| `WAKE_LOCK` | Keep connection alive during Doze |
+| Permission                             | Reason                                |
+| -------------------------------------- | ------------------------------------- |
+| `INTERNET`                             | Server communication                  |
+| `FOREGROUND_SERVICE`                   | Keep WebSocket alive in background    |
+| `POST_NOTIFICATIONS`                   | Show push notifications (Android 13+) |
+| `RECEIVE_BOOT_COMPLETED`               | Restart listener after reboot         |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Reliable background delivery          |
+| `VIBRATE`                              | High-priority notification vibration  |
+| `WAKE_LOCK`                            | Keep connection alive during Doze     |
 
 ---
 
