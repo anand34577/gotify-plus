@@ -18,7 +18,6 @@ import androidx.navigation.*
 import androidx.navigation.compose.*
 import com.gotify.client.ui.appinbox.AppInboxScreen
 import com.gotify.client.ui.apps.ApplicationsScreen
-import com.gotify.client.ui.apps.resolveAppImageUrl
 import com.gotify.client.ui.detail.MessageDetailScreen
 import com.gotify.client.ui.home.HomeScreen
 import com.gotify.client.ui.search.SearchScreen
@@ -73,7 +72,6 @@ fun MainNavHost(
             }
         }
     ) { innerPadding ->
-
         NavHost(
             navController      = navController,
             startDestination   = Routes.HOME,
@@ -83,7 +81,6 @@ fun MainNavHost(
             popEnterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 10 } },
             popExitTransition  = { fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { it / 10 } }
         ) {
-
 
             composable(Routes.HOME) {
                 val vm: HomeViewModel = hiltViewModel()
@@ -111,12 +108,11 @@ fun MainNavHost(
                 )
             }
 
-
             composable(Routes.APPS) {
                 val vm: AppsViewModel = hiltViewModel()
-                val uiState       by vm.uiState.collectAsStateWithLifecycle()
+                val uiState      by vm.uiState.collectAsStateWithLifecycle()
                 val serverBaseUrl by vm.serverBaseUrl.collectAsStateWithLifecycle()
-                val clientToken   by vm.clientToken.collectAsStateWithLifecycle()
+                val clientToken  by vm.clientToken.collectAsStateWithLifecycle()
 
                 ApplicationsScreen(
                     applications        = uiState.applications,
@@ -132,7 +128,6 @@ fun MainNavHost(
                     onCreateApp         = vm::createApplication
                 )
             }
-
 
             composable(Routes.SETTINGS) {
                 val vm: SettingsViewModel = hiltViewModel()
@@ -157,7 +152,6 @@ fun MainNavHost(
                 )
             }
 
-
             composable(
                 route     = Routes.DETAIL,
                 arguments = listOf(navArgument("messageId") { type = NavType.LongType })
@@ -177,16 +171,14 @@ fun MainNavHost(
                 }
             }
 
-
             composable(
                 route     = Routes.APP_INBOX,
                 arguments = listOf(navArgument("appId") { type = NavType.IntType })
             ) {
                 val vm: AppInboxViewModel = hiltViewModel()
                 val uiState by vm.uiState.collectAsStateWithLifecycle()
-
                 val resolvedIconUrl = uiState.appImageUrl?.let { path ->
-                    resolveAppImageUrl(vm.serverBaseUrl, path)
+                    com.gotify.client.ui.apps.resolveAppImageUrl(vm.serverBaseUrl, path)
                 }
 
                 AppInboxScreen(
@@ -200,7 +192,6 @@ fun MainNavHost(
                     onClearAll      = vm::clearAllMessages
                 )
             }
-
 
             composable(Routes.SEARCH) {
                 val vm: SearchViewModel = hiltViewModel()
@@ -221,7 +212,6 @@ fun MainNavHost(
         }
     }
 
-
     if (showServerSheet) {
         val vm: ServersViewModel = hiltViewModel()
         val servers    by vm.servers.collectAsStateWithLifecycle()
@@ -230,9 +220,6 @@ fun MainNavHost(
         ServerSwitcherSheet(
             servers          = servers,
             connectionStatus = connStatus,
-            onSwitchServer   = vm::switchServer,
-            onAddServer      = { showServerSheet = false },
-            onRemoveServer   = vm::removeServer,
             onDismiss        = { showServerSheet = false }
         )
     }

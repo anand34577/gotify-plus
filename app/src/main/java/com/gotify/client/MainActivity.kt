@@ -5,15 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.gotify.client.service.GotifyListenerService
 import com.gotify.client.ui.login.LoginScreen
@@ -37,8 +35,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val deepLinkMessageId = intent?.getLongExtra("message_id", -1L)
-            ?.takeIf { it != -1L }
+        val deepLinkMessageId = intent?.getLongExtra("message_id", -1L)?.takeIf { it != -1L }
 
         setContent {
             val appReady      by startupViewModel.ready.collectAsStateWithLifecycle()
@@ -53,7 +50,6 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color    = MaterialTheme.colorScheme.background
                 ) {
-
                     if (!appReady) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
@@ -61,13 +57,13 @@ class MainActivity : ComponentActivity() {
                         return@Surface
                     }
 
-                    
-
                     AppContent(
-                        isLoggedIn = settingsState.serverUrl.isNotBlank(),
+                        isLoggedIn        = settingsState.serverUrl.isNotBlank(),
                         deepLinkMessageId = deepLinkMessageId,
-                        loginState = loginState,
-                        loginViewModel = loginViewModel
+                        loginState        = loginState,
+                        onLoginWithPassword = { url, user, pass, name ->
+                            loginViewModel.loginWithPassword(url, user, pass, serverName = name)
+                        }
                     )
                 }
             }
@@ -80,14 +76,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-
-
 @Composable
-fun AppContent(
+private fun AppContent(
     isLoggedIn:          Boolean,
     deepLinkMessageId:   Long?,
-    loginState: LoginUiState,
-    loginViewModel:      LoginViewModel
+    loginState:          LoginUiState,
+    onLoginWithPassword: (url: String, username: String, password: String, serverName: String) -> Unit
 ) {
     val navController = rememberNavController()
 
@@ -103,15 +97,9 @@ fun AppContent(
 
     if (!isLoggedIn && !loginState.loginSuccess) {
         LoginScreen(
-            isLoading    = loginState.isLoading,
-            errorMessage = loginState.errorMessage,
-
-            onLoginWithPassword = { url, user, pass, name ->
-                loginViewModel.loginWithPassword(url, user, pass, serverName = name)
-            },
-            onLoginWithToken = { url, token, name ->
-                loginViewModel.loginWithToken(url, token, serverName = name)
-            }
+            isLoading            = loginState.isLoading,
+            errorMessage         = loginState.errorMessage,
+            onLoginWithPassword  = onLoginWithPassword
         )
     } else {
         MainNavHost(navController = navController)
