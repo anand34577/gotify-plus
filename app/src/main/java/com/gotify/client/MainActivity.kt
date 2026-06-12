@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
                         isLoggedIn = settingsState.serverUrl.isNotBlank(),
                         deepLinkMessageId = deepLinkMessageId,
                         loginState = loginState,
+                        onServerUrlChanged = { url -> loginViewModel.checkServerUrl(url) },
                         onLoginWithPassword = { url, user, pass, name ->
                             loginViewModel.loginWithPassword(url, user, pass, serverName = name)
                         }
@@ -86,6 +87,7 @@ private fun AppContent(
     isLoggedIn: Boolean,
     deepLinkMessageId: Long?,
     loginState: LoginUiState,
+    onServerUrlChanged: (String) -> Unit,
     onLoginWithPassword: (url: String, username: String, password: String, serverName: String) -> Unit
 ) {
     val navController = rememberNavController()
@@ -121,6 +123,10 @@ private fun AppContent(
         LoginScreen(
             isLoading = loginState.isLoading,
             errorMessage = loginState.errorMessage,
+            serverVersion = loginState.serverVersion,
+            serverVersionError = loginState.serverVersionError,
+            isCheckingServer = loginState.isCheckingServer,
+            onServerUrlChanged = onServerUrlChanged,
             onLoginWithPassword = onLoginWithPassword
         )
     } else {

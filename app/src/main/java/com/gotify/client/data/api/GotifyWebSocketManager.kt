@@ -60,9 +60,11 @@ class GotifyWebSocketManager @Inject constructor(
     val connectionState: StateFlow<StreamState> = _connectionState.asStateFlow()
     private var currentBaseUrl: String = ""
     private var currentToken: String = ""
-    fun connect(baseUrl: String, token: String) {
+    private var onUnauthorizedCallback: (() -> Unit)? = null
+    fun connect(baseUrl: String, token: String, onUnauthorized: () -> Unit = {}) {
         currentBaseUrl = baseUrl.trimEnd('/')
         currentToken = token
+        onUnauthorizedCallback = onUnauthorized
         retryAttempt = 0
         cancelRetry()
         disconnect(notifyListeners = false)
@@ -174,6 +176,11 @@ class GotifyWebSocketManager @Inject constructor(
             }
         }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (response?.code == 401) {
+                Log.w(TAG, "WebSocket connection unauthorized (401)")
+                onUnauthorizedCallback?.invoke()
+                return
+            }
             val reason = t.message ?: "Unknown error"
             Log.w(TAG, "WebSocket failure: $reason — scheduling reconnect")
             emit(StreamState.Error(reason))

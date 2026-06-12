@@ -14,8 +14,10 @@ import com.gotify.client.data.db.toDomain
 import com.gotify.client.data.db.toEntity
 import com.gotify.client.data.model.StreamState
 import com.gotify.client.data.repository.ServerManager
+import com.gotify.client.data.datastore.PreferencesRepository
 import com.gotify.client.notification.GotifyNotificationManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +37,8 @@ class GotifyListenerService : Service() {
     lateinit var applicationDao: ApplicationDao
     @Inject
     lateinit var notificationManager: GotifyNotificationManager
+    @Inject
+    lateinit var prefs: PreferencesRepository
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     override fun onCreate() {
         super.onCreate()
@@ -84,6 +88,12 @@ class GotifyListenerService : Service() {
             serverManager.activeServer.collect { server ->
                 if (server != null) {
                     Log.d(TAG, "Active server changed to: ${server.name}")
+                } else {
+                    val savedId = prefs.userPreferences.first().activeServerId
+                    if (savedId == -1L) {
+                        Log.d(TAG, "Active server is null and no active server in preferences, stopping service")
+                        stop(this@GotifyListenerService)
+                    }
                 }
             }
         }

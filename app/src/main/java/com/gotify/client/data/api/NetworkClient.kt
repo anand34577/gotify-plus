@@ -11,7 +11,8 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 class TokenAuthInterceptor(
-    private val tokenProvider: () -> String?
+    private val tokenProvider: () -> String?,
+    private val onUnauthorized: () -> Unit
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
@@ -20,7 +21,11 @@ class TokenAuthInterceptor(
         val authenticated = original.newBuilder()
             .header("X-Gotify-Key", token)
             .build()
-        return chain.proceed(authenticated)
+        val response = chain.proceed(authenticated)
+        if (response.code == 401) {
+            onUnauthorized()
+        }
+        return response
     }
 }
 fun buildBasicAuth(username: String, password: String): String {
@@ -32,11 +37,16 @@ object NetworkClientFactory {
     private val gson: Gson = GsonBuilder()
         .setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
         .create()
-    fun create(server: GotifyServer, isDebug: Boolean = false): GotifyApiClient {
+    fun create(
+        server: GotifyServer,
+        isDebug: Boolean = false,
+        onUnauthorized: () -> Unit = {}
+    ): GotifyApiClient {
         val baseUrl = server.baseUrl.trimEnd('/') + "/"
         val okHttpClient = buildOkHttpClient(
             tokenProvider = { server.clientToken },
-            isDebug = isDebug
+            isDebug = isDebug,
+            onUnauthorized = onUnauthorized
         )
         val retrofit = Retrofit.Builder()
             .baseUrl(baseUrl)
@@ -65,13 +75,14 @@ object NetworkClientFactory {
     }
     private fun buildOkHttpClient(
         tokenProvider: () -> String?,
-        isDebug: Boolean
+        isDebug: Boolean,
+        onUnauthorized: () -> Unit
     ): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
-            .addInterceptor(TokenAuthInterceptor(tokenProvider))
+            .addInterceptor(TokenAuthInterceptor(tokenProvider, onUnauthorized))
         if (isDebug) {
             val logging = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BODY
