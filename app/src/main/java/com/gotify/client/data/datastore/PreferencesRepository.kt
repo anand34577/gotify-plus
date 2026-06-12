@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -25,7 +26,8 @@ data class UserPreferences(
     val keepAliveEnabled: Boolean = true,
     val themeSelection: String = "DEFAULT",
     val activeServerId: Long = -1L,
-    val lastSyncTimestamp: Long = 0L
+    val lastSyncTimestamp: Long = 0L,
+    val autoPurgeDays: Int = 0
 )
 @Singleton
 class PreferencesRepository @Inject constructor(
@@ -41,6 +43,7 @@ class PreferencesRepository @Inject constructor(
         val THEME_SELECTION = stringPreferencesKey("theme_selection")
         val ACTIVE_SERVER_ID = longPreferencesKey("active_server_id")
         val LAST_SYNC_TIMESTAMP = longPreferencesKey("last_sync_timestamp")
+        val AUTO_PURGE_DAYS = intPreferencesKey("auto_purge_days")
     }
     val userPreferences: Flow<UserPreferences> = context.dataStore.data
         .catch { exception ->
@@ -57,7 +60,8 @@ class PreferencesRepository @Inject constructor(
                 keepAliveEnabled = prefs[Keys.KEEP_ALIVE_ENABLED] ?: true,
                 themeSelection = prefs[Keys.THEME_SELECTION] ?: "DEFAULT",
                 activeServerId = prefs[Keys.ACTIVE_SERVER_ID] ?: -1L,
-                lastSyncTimestamp = prefs[Keys.LAST_SYNC_TIMESTAMP] ?: 0L
+                lastSyncTimestamp = prefs[Keys.LAST_SYNC_TIMESTAMP] ?: 0L,
+                autoPurgeDays = prefs[Keys.AUTO_PURGE_DAYS] ?: 0
             )
         }
     suspend fun setNotificationsEnabled(enabled: Boolean) =
@@ -78,5 +82,7 @@ class PreferencesRepository @Inject constructor(
         context.dataStore.edit { it[Keys.ACTIVE_SERVER_ID] = id }
     suspend fun setLastSyncTimestamp(ts: Long) =
         context.dataStore.edit { it[Keys.LAST_SYNC_TIMESTAMP] = ts }
+    suspend fun setAutoPurgeDays(days: Int) =
+        context.dataStore.edit { it[Keys.AUTO_PURGE_DAYS] = days }
     suspend fun clearAll() = context.dataStore.edit { it.clear() }
 }

@@ -358,11 +358,16 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     // ── FIX 1: filter state lives HERE, not inside AppFilterChips ─────────────
     var selectedAppId by remember { mutableStateOf<Int?>(null) }
+    var selectedTag by remember { mutableStateOf<String?>(null) }
     val appMap = remember(applications) { applications.associateBy { it.id } }
-    // ── FIX 1: this actually filters now ──────────────────────────────────────
-    val filteredMessages = remember(messages, selectedAppId) {
-        if (selectedAppId == null) messages
-        else messages.filter { it.appId == selectedAppId }
+    val allTags = remember(messages) {
+        messages.flatMap { it.tags }.distinct().sorted()
+    }
+    val filteredMessages = remember(messages, selectedAppId, selectedTag) {
+        messages.filter { msg ->
+            (selectedAppId == null || msg.appId == selectedAppId) &&
+            (selectedTag == null || msg.tags.contains(selectedTag))
+        }
     }
     val pullRefreshState = rememberPullToRefreshState()
     Scaffold(
@@ -407,10 +412,21 @@ fun HomeScreen(
                         AppFilterChips(
                             applications = applications,
                             clientToken = clientToken,
-                            selectedAppId = selectedAppId,        // ← controlled from parent
+                            selectedAppId = selectedAppId,
                             onSelectApp = { id ->
-                                // Toggle: tap selected chip again to clear filter
                                 selectedAppId = if (selectedAppId == id) null else id
+                            }
+                        )
+                    }
+                }
+                // Tag filter chips
+                if (allTags.isNotEmpty()) {
+                    item(key = "tag_filter_chips") {
+                        TagFilterChips(
+                            tags = allTags,
+                            selectedTag = selectedTag,
+                            onSelectTag = { tag ->
+                                selectedTag = if (selectedTag == tag) null else tag
                             }
                         )
                     }
@@ -425,7 +441,7 @@ fun HomeScreen(
                         Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
                             EmptyState(
                                 icon = Icons.Outlined.NotificationsNone,
-                                title = if (selectedAppId != null) "No messages from this app"
+                                title = if (selectedAppId != null || selectedTag != null) "No messages match your filters"
                                 else "No messages yet",
                                 subtitle = "Messages from your Gotify server will appear here"
                             )
@@ -448,6 +464,7 @@ fun HomeScreen(
                             clientToken = clientToken,
                             priority = message.priority,
                             date = message.date,
+                            tags = message.tags,
                             onClick = { onMessageClick(message) },
                             onDelete = { onDeleteMessage(message.id) }
                         )
@@ -597,6 +614,27 @@ private fun AppFilterChips(
                         size = 18.dp
                     )
                 },
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+    }
+}
+@Composable
+private fun TagFilterChips(
+    tags: List<String>,
+    selectedTag: String?,
+    onSelectTag: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        tags.forEach { tag ->
+            val isSelected = selectedTag == tag
+            FilterChip(
+                selected = isSelected,
+                onClick = { onSelectTag(tag) },
+                label = { Text("#$tag", style = MaterialTheme.typography.labelMedium) },
                 shape = RoundedCornerShape(16.dp)
             )
         }

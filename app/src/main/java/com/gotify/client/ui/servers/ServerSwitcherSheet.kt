@@ -11,7 +11,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -31,7 +34,10 @@ import com.gotify.client.ui.components.ConnectionStatus
 fun ServerSwitcherSheet(
     servers: List<GotifyServer>,
     connectionStatus: ConnectionStatus,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onAddServer: () -> Unit,
+    onSwitchServer: (Long) -> Unit,
+    onDeleteServer: (Long) -> Unit
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -50,7 +56,9 @@ fun ServerSwitcherSheet(
             servers.forEach { server ->
                 ServerRow(
                     server = server,
-                    connectionStatus = connectionStatus
+                    connectionStatus = connectionStatus,
+                    onSwitchServer = { onSwitchServer(server.id) },
+                    onDeleteServer = { onDeleteServer(server.id) }
                 )
             }
             if (servers.isEmpty()) {
@@ -67,6 +75,19 @@ fun ServerSwitcherSheet(
                     )
                 }
             }
+            
+            androidx.compose.material3.Button(
+                onClick = onAddServer,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .height(52.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.Add, null, modifier = Modifier.size(20.dp))
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(horizontal = 4.dp))
+                Text("Add Server", fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -74,13 +95,19 @@ fun ServerSwitcherSheet(
 private fun ServerRow(
     server: GotifyServer,
     connectionStatus: ConnectionStatus,
-    modifier: Modifier = Modifier
+    onSwitchServer: () -> Unit,
+    onDeleteServer: () -> Unit
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+        onClick = onSwitchServer,
+        color = if (server.isActive) MaterialTheme.colorScheme.primaryContainer 
+                else MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            1.dp,
+            if (server.isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -111,7 +138,9 @@ private fun ServerRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    ConnectionDot(status = connectionStatus)
+                    if (server.isActive) {
+                        ConnectionDot(status = connectionStatus)
+                    }
                 }
                 Text(
                     text = server.baseUrl,
@@ -121,11 +150,24 @@ private fun ServerRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Icon(
-                Icons.Outlined.CheckCircle, null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
+            if (server.isActive) {
+                Icon(
+                    androidx.compose.material.icons.Icons.Outlined.CheckCircle, null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+            } else {
+                androidx.compose.material3.IconButton(
+                    onClick = onDeleteServer,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Outlined.Delete, "Delete server",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }

@@ -57,6 +57,7 @@ class GotifyListenerService : Service() {
         startAsForeground()
         observeWebSocket()
         observeActiveServer()
+        observeConnectionStates()
         return START_STICKY
     }
     override fun onBind(intent: Intent?): IBinder? = null
@@ -75,13 +76,33 @@ class GotifyListenerService : Service() {
         scope.launch {
             webSocketManager.streamState.collect { state ->
                 when (state) {
-                    is StreamState.Message -> handleNewMessage(state.message)
-                    is StreamState.Error -> Log.w(TAG, "Stream error: ${state.reason}")
-                    is StreamState.Closed -> Log.d(TAG, "Stream closed: ${state.reason}")
+                    is StreamState.Message -> handleNewMessage(state.serverId, state.message)
+                    is StreamState.Error -> Log.w(TAG, "Server ${state.serverId} stream error: ${state.reason}")
+                    is StreamState.Closed -> Log.d(TAG, "Server ${state.serverId} stream closed: ${state.reason}")
                     else -> {}
                 }
             }
         }
+    }
+    private fun observeConnectionStates() {
+        scope.launch {
+            webSocketManager.connectionStates.collect { states ->
+                val connectedCount = states.values.count { it is StreamState.Connected }
+                val totalCount = states.size
+                val serverName = serverManager.activeServer.value?.name ?: "Gotify"
+                val text = if (totalCount > 1) {
+                    "Connected to $connectedCount/$totalCount servers"
+                } else {
+                    serverName
+                }
+                updateForegroundNotification(text)
+            }
+        }
+    }
+    private fun updateForegroundNotification(text: String) {
+        val notification = notificationManager.buildForegroundNotification(text, buildTapIntent())
+        val systemNotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        systemNotificationManager.notify(GotifyNotificationManager.NOTIFICATION_ID_FOREGROUND, notification)
     }
     private fun observeActiveServer() {
         scope.launch {
@@ -98,19 +119,30 @@ class GotifyListenerService : Service() {
             }
         }
     }
-    private suspend fun handleNewMessage(message: com.gotify.client.data.model.GotifyMessage) {
-        val serverId = serverManager.activeServer.value?.id ?: return
+    private suspend fun handleNewMessage(serverId: Long, message: com.gotify.client.data.model.GotifyMessage) {
         Log.d(
             TAG,
-            "New message: id=${message.id} appId=${message.appId} priority=${message.priority}"
+            "New message from server $serverId: id=${message.id} appId=${message.appId} priority=${message.priority}"
         )
+        // 1. Insert message into Database
         messageDao.insertMessage(message.toEntity(serverId))
+
+        // 2. Perform Auto-Purge check
+        val userPrefs = prefs.userPreferences.first()
+        if (userPrefs.autoPurgeDays > 0) {
+            val cutoff = System.currentTimeMillis() - (userPrefs.autoPurgeDays * 24L * 60L * 60L * 1000L)
+            messageDao.evictOldMessages(cutoff)
+        }
+
+        // 3. Post System Notification with launcher badge count
+        val unreadCount = messageDao.getTotalUnreadCount()
         val app = applicationDao.getApplicationById(message.appId)?.toDomain()
         if (app != null) notificationManager.createAppChannels(app)
         notificationManager.postMessageNotification(
             message = message,
             app = app,
-            tapIntent = buildDetailTapIntent(message.id)
+            tapIntent = buildDetailTapIntent(message.id),
+            unreadCount = unreadCount
         )
     }
     private fun buildTapIntent(): PendingIntent {

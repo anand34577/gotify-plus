@@ -177,9 +177,6 @@ fun ApplicationsScreen(
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Outlined.Refresh, "Refresh")
                     }
-                    IconButton(onClick = { showCreateSheet = true }) {
-                        Icon(Icons.Outlined.Add, "Add application")
-                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background

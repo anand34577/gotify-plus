@@ -66,6 +66,7 @@ object Routes {
     const val DETAIL = "detail/{messageId}"
     const val APP_INBOX = "app_inbox/{appId}"
     const val SEARCH = "search"
+    const val ADD_SERVER = "add_server"
 
     fun detail(messageId: Long) = "detail/$messageId"
     fun appInbox(appId: Int) = "app_inbox/$appId"
@@ -191,6 +192,7 @@ fun MainNavHost(
                     onSetTheme = vm::setThemeSelection,
                     onToggleMarkdown = vm::setMarkdown,
                     onToggleKeepAlive = vm::setKeepAlive,
+                    onSetAutoPurgeDays = vm::setAutoPurgeDays,
                     onLogout = {
                         vm.logout {
                             navController.navigate(Routes.HOME) {
@@ -215,7 +217,9 @@ fun MainNavHost(
                         application = application,
                         onBack = { navController.popBackStack() },
                         onDelete = { vm.deleteMessage { navController.popBackStack() } },
-                        onOpenAppInbox = { navController.navigate(Routes.appInbox(msg.appId)) }
+                        onOpenAppInbox = { navController.navigate(Routes.appInbox(msg.appId)) },
+                        onAddTag = vm::addTag,
+                        onRemoveTag = vm::removeTag
                     )
                 }
             }
@@ -247,15 +251,50 @@ fun MainNavHost(
                 val query by vm.query.collectAsStateWithLifecycle()
                 val results by vm.searchResults.collectAsStateWithLifecycle()
                 val apps by vm.applications.collectAsStateWithLifecycle()
+                val selectedPriority by vm.selectedPriority.collectAsStateWithLifecycle()
+                val selectedAppId by vm.selectedAppId.collectAsStateWithLifecycle()
+                val selectedDateFilter by vm.selectedDateFilter.collectAsStateWithLifecycle()
 
                 SearchScreen(
                     query = query,
                     results = results,
                     applications = apps,
+                    selectedPriority = selectedPriority,
+                    selectedAppId = selectedAppId,
+                    selectedDateFilter = selectedDateFilter,
                     onQueryChange = vm::setQuery,
                     onClearQuery = vm::clearQuery,
+                    onPriorityChange = vm::setPriority,
+                    onAppIdChange = vm::setAppId,
+                    onDateFilterChange = vm::setDateFilter,
                     onBack = { navController.popBackStack() },
                     onMessageClick = { navController.navigate(Routes.detail(it.id)) }
+                )
+            }
+
+            composable(Routes.ADD_SERVER) {
+                val vm: com.gotify.client.ui.viewmodel.LoginViewModel = hiltViewModel()
+                val loginState by vm.uiState.collectAsStateWithLifecycle()
+
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    vm.resetState()
+                }
+
+                androidx.compose.runtime.LaunchedEffect(loginState.loginSuccess) {
+                    if (loginState.loginSuccess) {
+                        navController.popBackStack()
+                    }
+                }
+
+                com.gotify.client.ui.servers.AddServerScreen(
+                    isLoading = loginState.isLoading,
+                    errorMessage = loginState.errorMessage,
+                    serverVersion = loginState.serverVersion,
+                    serverVersionError = loginState.serverVersionError,
+                    isCheckingServer = loginState.isCheckingServer,
+                    onServerUrlChanged = vm::checkServerUrl,
+                    onLoginWithPassword = vm::loginWithPassword,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }
@@ -269,7 +308,18 @@ fun MainNavHost(
         ServerSwitcherSheet(
             servers = servers,
             connectionStatus = connStatus,
-            onDismiss = { showServerSheet = false }
+            onDismiss = { showServerSheet = false },
+            onAddServer = { 
+                showServerSheet = false
+                navController.navigate(Routes.ADD_SERVER)
+            },
+            onSwitchServer = { serverId ->
+                vm.switchServer(serverId)
+                showServerSheet = false
+            },
+            onDeleteServer = { serverId ->
+                vm.removeServer(serverId)
+            }
         )
     }
 }

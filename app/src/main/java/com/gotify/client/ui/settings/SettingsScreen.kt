@@ -70,7 +70,8 @@ data class SettingsState(
     val themeSelection: String = "DEFAULT",
     val serverName: String = "",
     val serverUrl: String = "",
-    val appVersion: String = "1.0.0"
+    val appVersion: String = "1.0.0",
+    val autoPurgeDays: Int = 0
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -85,12 +86,14 @@ fun SettingsScreen(
     onSetTheme: (String) -> Unit,
     onToggleMarkdown: (Boolean) -> Unit,
     onToggleKeepAlive: (Boolean) -> Unit,
+    onSetAutoPurgeDays: (Int) -> Unit,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showPurgeDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
@@ -148,15 +151,30 @@ fun SettingsScreen(
                         }
                     }
                 )
+                val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+                val isIgnoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    pm.isIgnoringBatteryOptimizations(context.packageName)
+                } else true
+
                 ClickableSettingsRow(
                     icon = Icons.Outlined.BatteryAlert,
                     title = "Battery optimization",
-                    subtitle = "Disable to ensure reliable delivery",
+                    subtitle = if (isIgnoring) "Optimization disabled (Recommended)" else "Disable to ensure reliable delivery",
                     onClick = {
-                        context.startActivity(
-                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                                .apply { data = Uri.parse("package:${context.packageName}") }
-                        )
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            try {
+                                if (!isIgnoring) {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                            .apply { data = Uri.parse("package:${context.packageName}") }
+                                    )
+                                } else {
+                                    context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                }
+                            } catch (e: Exception) {
+                                context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            }
+                        }
                     }
                 )
             }
@@ -200,6 +218,18 @@ fun SettingsScreen(
                     subtitle = "Maintain persistent WebSocket connection",
                     checked = state.keepAliveEnabled,
                     onChecked = onToggleKeepAlive
+                )
+                ClickableSettingsRow(
+                    icon = Icons.Outlined.Storage,
+                    title = "Auto-purge messages",
+                    subtitle = when (state.autoPurgeDays) {
+                        0 -> "Never"
+                        7 -> "After 7 days"
+                        30 -> "After 30 days"
+                        90 -> "After 90 days"
+                        else -> "After ${state.autoPurgeDays} days"
+                    },
+                    onClick = { showPurgeDialog = true }
                 )
             }
 
@@ -292,6 +322,40 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showThemeDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (showPurgeDialog) {
+        val purgeOptions = listOf(0, 7, 30, 90)
+        AlertDialog(
+            onDismissRequest = { showPurgeDialog = false },
+            title = { Text("Select Retention Period") },
+            text = {
+                Column {
+                    purgeOptions.forEach { days ->
+                        val label = when (days) {
+                            0 -> "Never (Keep all messages)"
+                            7 -> "7 days"
+                            30 -> "30 days"
+                            90 -> "90 days"
+                            else -> "$days days"
+                        }
+                        TextButton(
+                            onClick = {
+                                onSetAutoPurgeDays(days)
+                                showPurgeDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = if (days == state.autoPurgeDays) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary) else ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                        ) {
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPurgeDialog = false }) { Text("Close") }
             }
         )
     }
