@@ -1,48 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-
     <!-- ── Permissions ─────────────────────────────────────────────────────── -->
-
     <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
     <!-- Foreground service — remoteMessaging is correct for WebSocket/push -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
-
     <!-- Push notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
     <!-- Vibration for high-priority notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
-
     <!-- Restart after boot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
     <!-- Battery optimization bypass request -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
     <!-- Wake lock to keep WebSocket alive -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <!-- ── Application ──────────────────────────────────────────────────────── -->
-
     <application
         android:name=".GotifyApplication"
-        android:label="@string/app_name"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:theme="@style/Theme.GotifyClient"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:theme="@style/Theme.GotifyClient"
         tools:targetApi="36">
-
         <!-- ── Main Activity ──────────────────────────────────────────────── -->
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -52,29 +40,24 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
             <!-- Deep link: gotifyclient://message/{id} -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="gotifyclient"
-                    android:host="message" />
+                    android:host="message"
+                    android:scheme="gotifyclient" />
             </intent-filter>
         </activity>
-
         <!-- ── Background Service ─────────────────────────────────────────── -->
-
         <service
             android:name=".service.GotifyListenerService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="remoteMessaging"
             android:stopWithTask="false" />
-
         <!-- ── Boot Receiver ──────────────────────────────────────────────── -->
-
         <receiver
             android:name=".service.BootReceiver"
             android:enabled="true"
@@ -84,7 +67,5 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
-
     </application>
-
 </manifest>

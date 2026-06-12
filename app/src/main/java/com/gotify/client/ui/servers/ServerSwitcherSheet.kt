@@ -1,21 +1,31 @@
 package com.gotify.client.ui.servers
-
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.*
+import androidx.compose.ui.unit.dp
 import com.gotify.client.data.model.GotifyServer
 import com.gotify.client.ui.components.ConnectionDot
 import com.gotify.client.ui.components.ConnectionStatus
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerSwitcherSheet(
@@ -37,17 +47,17 @@ fun ServerSwitcherSheet(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
-
             servers.forEach { server ->
                 ServerRow(
                     server = server,
                     connectionStatus = connectionStatus
                 )
             }
-
             if (servers.isEmpty()) {
                 Box(
-                    Modifier.fillMaxWidth().padding(32.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -60,7 +70,6 @@ fun ServerSwitcherSheet(
         }
     }
 }
-
 @Composable
 private fun ServerRow(
     server: GotifyServer,
@@ -90,7 +99,6 @@ private fun ServerRow(
                     )
                 }
             }
-
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -113,7 +121,6 @@ private fun ServerRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-
             Icon(
                 Icons.Outlined.CheckCircle, null,
                 tint = MaterialTheme.colorScheme.primary,

@@ -1,24 +1,56 @@
 package com.gotify.client.ui.detail
-
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.*
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
-import com.gotify.client.ui.components.*
+import com.gotify.client.ui.components.AppIcon
+import com.gotify.client.ui.components.PriorityBadge
+import com.gotify.client.ui.components.RelativeTime
 import dev.jeziellago.compose.markdowntext.MarkdownText
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessageDetailScreen(
@@ -30,15 +62,12 @@ fun MessageDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val uriHandler = LocalUriHandler.current
-
-
     val isMarkdown = message.extras?.display?.contentType == "text/markdown"
-
     Scaffold(
         modifier = modifier,
-        topBar   = {
+        topBar = {
             TopAppBar(
-                title          = { Text("Message") },
+                title = { Text("Message") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
@@ -60,7 +89,6 @@ fun MessageDetailScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -69,36 +97,34 @@ fun MessageDetailScreen(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
-
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Row(
-                    modifier  = Modifier
+                    modifier = Modifier
                         .fillMaxWidth()
                         .clickable(onClick = onOpenAppInbox)
                         .padding(16.dp),
-                    verticalAlignment    = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     AppIcon(
                         imageUrl = application?.image,
-                        appName  = application?.name ?: "App",
-                        size     = 48.dp
+                        appName = application?.name ?: "App",
+                        size = 48.dp
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text       = application?.name ?: "App ${message.appId}",
-                            style      = MaterialTheme.typography.titleSmall,
+                            text = application?.name ?: "App ${message.appId}",
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
-                            color      = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary
                         )
                         if (!application?.description.isNullOrBlank()) {
                             Text(
-                                text  = application!!.description,
+                                text = application!!.description,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1
@@ -112,19 +138,15 @@ fun MessageDetailScreen(
                     }
                 }
             }
-
-
             if (message.title.isNotBlank()) {
                 Text(
-                    text       = message.title,
-                    style      = MaterialTheme.typography.headlineSmall,
+                    text = message.title,
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color      = MaterialTheme.colorScheme.onBackground,
+                    color = MaterialTheme.colorScheme.onBackground,
                     lineHeight = 32.sp
                 )
             }
-
-
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
@@ -133,54 +155,46 @@ fun MessageDetailScreen(
                 Column(modifier = Modifier.padding(20.dp)) {
                     if (isMarkdown) {
                         MarkdownText(
-                            markdown  = message.message,
-                            style     = MaterialTheme.typography.bodyLarge.copy(
+                            markdown = message.message,
+                            style = MaterialTheme.typography.bodyLarge.copy(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 lineHeight = 24.sp
                             )
                         )
                     } else {
                         Text(
-                            text       = message.message,
-                            style      = MaterialTheme.typography.bodyLarge,
-                            color      = MaterialTheme.colorScheme.onSurface,
+                            text = message.message,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
                             lineHeight = 24.sp
                         )
                     }
                 }
             }
-
-
             val bigImageUrl = message.extras?.notification?.bigImageUrl
             if (!bigImageUrl.isNullOrBlank()) {
                 MessageImageCard(imageUrl = bigImageUrl)
             }
-
-
             val actionUrl = message.extras?.action?.onClick?.intentUrl
                 ?: message.extras?.action?.onReceive?.intentUrl
             if (!actionUrl.isNullOrBlank()) {
                 Button(
-                    onClick  = { uriHandler.openUri(actionUrl) },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape    = RoundedCornerShape(12.dp)
+                    onClick = { uriHandler.openUri(actionUrl) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Outlined.OpenInNew, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Open Action", fontWeight = FontWeight.SemiBold)
                 }
             }
-
-
             DetailMetadataCard(message = message)
-
             Spacer(Modifier.height(40.dp))
         }
     }
 }
-
-
-
 @Composable
 private fun MessageImageCard(imageUrl: String) {
     Surface(
@@ -205,25 +219,20 @@ private fun MessageImageCard(imageUrl: String) {
                 )
             }
             Spacer(Modifier.height(10.dp))
-
-
-
             Text(
-                text  = imageUrl,
+                text = imageUrl,
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.primary
             )
         }
     }
 }
-
 @Composable
 private fun DetailMetadataCard(message: GotifyMessage) {
     var expanded by remember { mutableStateOf(false) }
-
     Surface(
-        shape  = RoundedCornerShape(16.dp),
-        color  = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
@@ -232,7 +241,7 @@ private fun DetailMetadataCard(message: GotifyMessage) {
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment    = Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
@@ -257,43 +266,43 @@ private fun DetailMetadataCard(message: GotifyMessage) {
                     modifier = Modifier.size(18.dp)
                 )
             }
-
             if (expanded) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    MetaRow("Message ID",  "#${message.id}")
-                    MetaRow("App ID",      "#${message.appId}")
-                    MetaRow("Priority",    "${message.priority}")
-                    MetaRow("Timestamp",   message.date)
+                    MetaRow("Message ID", "#${message.id}")
+                    MetaRow("App ID", "#${message.appId}")
+                    MetaRow("Priority", "${message.priority}")
+                    MetaRow("Timestamp", message.date)
                     if (message.extras != null) {
-                        MetaRow("Content type",
-                            message.extras.display?.contentType ?: "text/plain")
+                        MetaRow(
+                            "Content type",
+                            message.extras.display?.contentType ?: "text/plain"
+                        )
                     }
                 }
             }
         }
     }
 }
-
 @Composable
 private fun MetaRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text  = label,
+            text = label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text       = value,
-            style      = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            color      = MaterialTheme.colorScheme.onSurface,
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
     }
