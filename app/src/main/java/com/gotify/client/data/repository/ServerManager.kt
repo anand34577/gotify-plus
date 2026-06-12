@@ -6,6 +6,7 @@ import com.gotify.client.data.api.NetworkClientFactory
 import com.gotify.client.data.model.GotifyServer
 import com.gotify.client.data.db.ServerDao
 import com.gotify.client.data.db.toDomain
+import com.gotify.client.data.db.toEntity
 import com.gotify.client.data.datastore.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,10 +42,23 @@ class ServerManager @Inject constructor(
     init {
         scope.launch {
             try {
-                val savedId = prefs.get().userPreferences.first().activeServerId
-                if (savedId != -1L) {
-                    val entity = serverDao.get().getServerById(savedId) ?: serverDao.get().getActiveServer()
-                    entity?.let { addServer(it.toDomain()) }
+                serverDao.get().getAllServers().collect { entities ->
+                    val domainServers = entities.map { it.toDomain() }
+                    _servers.value = domainServers
+                    
+                    // Sync sockets
+                    syncWebSockets()
+                    
+                    // Active server mapping
+                    val active = domainServers.find { it.isActive }
+                    if (active != null) {
+                        if (_activeServer.value?.id != active.id || _activeServer.value?.clientToken != active.clientToken || _activeServer.value?.baseUrl != active.baseUrl) {
+                            activateServer(active)
+                        }
+                    } else {
+                        _activeServer.value = null
+                        _apiClient = null
+                    }
                 }
             } catch (e: Exception) {
                 // Ignore initialization errors at startup
@@ -56,66 +70,79 @@ class ServerManager @Inject constructor(
         _unauthorizedMessage.value = null
     }
 
-    fun handleUnauthorized() {
-        val server = _activeServer.value ?: return
+    fun handleUnauthorized(serverId: Long) {
         _unauthorizedMessage.value = "Session expired. Client was terminated on the server."
         scope.launch {
-            serverDao.get().deleteServer(server.id)
-            reset()
-            prefs.get().clearAll()
+            serverDao.get().deleteServer(serverId)
+            val active = _activeServer.value
+            if (active?.id == serverId) {
+                prefs.get().setActiveServerId(-1L)
+            }
         }
     }
+
     fun addServer(server: GotifyServer) {
-        val existing = _servers.value.toMutableList()
-        val resolvedId = if (server.id > 0L) server.id else System.currentTimeMillis()
-        if (server.isActive) {
-            existing.replaceAll { it.copy(isActive = false) }
+        scope.launch {
+            val resolvedId = if (server.id > 0L) server.id else System.currentTimeMillis()
+            var entity = server.toEntity().copy(id = resolvedId)
+            if (server.isActive) {
+                serverDao.get().deactivateAll()
+                entity = entity.copy(isActive = true)
+            }
+            serverDao.get().insertServer(entity)
+            if (server.isActive) {
+                prefs.get().setActiveServerId(resolvedId)
+            }
         }
-        val newServer = server.copy(
-            id = resolvedId,
-            isActive = server.isActive || existing.isEmpty()
-        )
-        val idx = existing.indexOfFirst { it.id == resolvedId }
-        if (idx >= 0) existing[idx] = newServer else existing.add(newServer)
-        _servers.value = existing
-        if (newServer.isActive) activateServer(newServer)
     }
+
     fun switchServer(serverId: Long) {
-        val target = _servers.value.find { it.id == serverId } ?: return
-        _servers.value = _servers.value.map { it.copy(isActive = it.id == serverId) }
-        activateServer(target)
-    }
-    fun removeServer(serverId: Long) {
-        val updated = _servers.value.filter { it.id != serverId }
-        _servers.value = updated
-        if (_activeServer.value?.id == serverId) {
-            _apiClient = null
-            _activeServer.value = null
-            webSocketManager.disconnect()
-            updated.firstOrNull()?.let { activateServer(it) }
+        scope.launch {
+            serverDao.get().switchActiveServer(serverId)
+            prefs.get().setActiveServerId(serverId)
         }
     }
+
+    fun removeServer(serverId: Long) {
+        scope.launch {
+            serverDao.get().deleteServer(serverId)
+            val active = _activeServer.value
+            if (active?.id == serverId) {
+                prefs.get().setActiveServerId(-1L)
+            }
+        }
+    }
+
     fun reset() {
-        _servers.value = emptyList()
-        _apiClient = null
-        _activeServer.value = null
-        webSocketManager.disconnect()
+        scope.launch {
+            val active = _activeServer.value
+            if (active != null) {
+                serverDao.get().deleteServer(active.id)
+            }
+            _activeServer.value = null
+            _apiClient = null
+            webSocketManager.disconnectAll()
+        }
     }
+
     fun updateServer(server: GotifyServer) {
-        _servers.value = _servers.value.map { if (it.id == server.id) server else it }
-        if (_activeServer.value?.id == server.id) activateServer(server)
+        scope.launch {
+            serverDao.get().updateServer(server.toEntity())
+        }
     }
+
+    private fun syncWebSockets() {
+        webSocketManager.updateServers(_servers.value) { serverId ->
+            handleUnauthorized(serverId)
+        }
+    }
+
     private fun activateServer(server: GotifyServer) {
         _activeServer.value = server
         _apiClient = NetworkClientFactory.create(
             server = server,
             isDebug = true,
-            onUnauthorized = { handleUnauthorized() }
-        )
-        webSocketManager.connect(
-            baseUrl = server.baseUrl,
-            token = server.clientToken,
-            onUnauthorized = { handleUnauthorized() }
+            onUnauthorized = { handleUnauthorized(server.id) }
         )
     }
 }

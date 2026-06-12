@@ -7,6 +7,7 @@ import android.net.NetworkRequest
 import android.util.Log
 import com.google.gson.Gson
 import com.gotify.client.data.model.GotifyMessage
+import com.gotify.client.data.model.GotifyServer
 import com.gotify.client.data.model.StreamState
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -42,44 +43,119 @@ class GotifyWebSocketManager @Inject constructor(
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var webSocket: WebSocket? = null
-    private var retryJob: Job? = null
-    private var retryAttempt = 0
+
+    // Concurrent maps for server connections
+    private val webSockets = java.util.concurrent.ConcurrentHashMap<Long, WebSocket>()
+    private val retryJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+    private val retryAttempts = java.util.concurrent.ConcurrentHashMap<Long, Int>()
+    private val serverDetails = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>>()
+    private val unauthorizedCallbacks = java.util.concurrent.ConcurrentHashMap<Long, () -> Unit>()
+
     private val okHttpClient = OkHttpClient.Builder()
         .pingInterval(30, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .build()
+
     private val _streamState = MutableSharedFlow<StreamState>(
         replay = 0,
         extraBufferCapacity = 64
     )
     val streamState: SharedFlow<StreamState> = _streamState.asSharedFlow()
-    private val _connectionState =
-        MutableStateFlow<StreamState>(StreamState.Closed(0, "Not started"))
-    val connectionState: StateFlow<StreamState> = _connectionState.asStateFlow()
-    private var currentBaseUrl: String = ""
-    private var currentToken: String = ""
-    private var onUnauthorizedCallback: (() -> Unit)? = null
-    fun connect(baseUrl: String, token: String, onUnauthorized: () -> Unit = {}) {
-        currentBaseUrl = baseUrl.trimEnd('/')
-        currentToken = token
-        onUnauthorizedCallback = onUnauthorized
-        retryAttempt = 0
-        cancelRetry()
-        disconnect(notifyListeners = false)
-        openSocket()
+
+    private val _connectionStates = MutableStateFlow<Map<Long, StreamState>>(emptyMap())
+    val connectionStates: StateFlow<Map<Long, StreamState>> = _connectionStates.asStateFlow()
+
+    fun updateServers(servers: List<GotifyServer>, onUnauthorized: (Long) -> Unit) {
+        val currentIds = serverDetails.keys.toList()
+        val newIds = servers.map { it.id }
+
+        // Remove deleted servers
+        for (id in currentIds) {
+            if (id !in newIds) {
+                disconnectServer(id)
+                serverDetails.remove(id)
+                unauthorizedCallbacks.remove(id)
+            }
+        }
+
+        // Add or update servers
+        for (server in servers) {
+            val cached = serverDetails[server.id]
+            val hasChanged = cached == null || cached.first != server.baseUrl || cached.second != server.clientToken
+            
+            if (hasChanged) {
+                disconnectServer(server.id)
+                serverDetails[server.id] = Pair(server.baseUrl, server.clientToken)
+                unauthorizedCallbacks[server.id] = { onUnauthorized(server.id) }
+                connectServer(server.id)
+            }
+        }
         registerNetworkCallback()
     }
+
+    private fun connectServer(serverId: Long) {
+        val details = serverDetails[serverId] ?: return
+        val baseUrl = details.first
+        val token = details.second
+        val streamUrl = buildStreamUrl(baseUrl, token)
+        
+        Log.d(TAG, "Server $serverId - Connecting to: $streamUrl")
+        emit(serverId, StreamState.Connecting(serverId))
+        
+        val request = Request.Builder()
+            .url(streamUrl)
+            .build()
+        webSockets[serverId] = okHttpClient.newWebSocket(request, GotifyWebSocketListener(serverId))
+    }
+
+    private fun buildStreamUrl(baseUrl: String, token: String): String {
+        val wsBase = baseUrl
+            .replace("https://", "wss://")
+            .replace("http://", "ws://")
+        return "$wsBase/stream?token=$token"
+    }
+
+    fun disconnectServer(serverId: Long) {
+        cancelRetry(serverId)
+        webSockets[serverId]?.close(1000, "Disconnected")
+        webSockets.remove(serverId)
+        emit(serverId, StreamState.Closed(serverId, 1000, "Disconnected"))
+    }
+
+    fun disconnectAll() {
+        for (id in serverDetails.keys) {
+            disconnectServer(id)
+        }
+        serverDetails.clear()
+        unauthorizedCallbacks.clear()
+    }
+
+    fun destroy() {
+        disconnectAll()
+        networkCallback?.let {
+            try {
+                connectivityManager.unregisterNetworkCallback(it)
+            } catch (e: Exception) {
+            }
+        }
+        scope.cancel()
+    }
+
     private fun registerNetworkCallback() {
         if (networkCallback != null) return
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (_connectionState.value is StreamState.Error || (_connectionState.value is StreamState.Closed && currentBaseUrl.isNotBlank())) {
-                    Log.d(TAG, "Network restored, attempting to reconnect...")
-                    retryAttempt = 0
-                    cancelRetry()
-                    scheduleReconnect()
+                Log.d(TAG, "Network restored, checking connections...")
+                val states = _connectionStates.value
+                for ((id, details) in serverDetails) {
+                    val state = states[id]
+                    if (state is StreamState.Error || (state is StreamState.Closed && details.first.isNotBlank())) {
+                        Log.d(TAG, "Server $id - Reconnecting due to network restore")
+                        retryAttempts[id] = 0
+                        cancelRetry(id)
+                        scheduleReconnect(id)
+                    }
                 }
             }
             override fun onLost(network: Network) {
@@ -92,109 +168,89 @@ class GotifyWebSocketManager @Inject constructor(
             networkCallback!!
         )
     }
-    fun disconnect(notifyListeners: Boolean = true) {
-        cancelRetry()
-        webSocket?.close(1000, "User disconnected")
-        webSocket = null
-        if (notifyListeners) {
-            emit(StreamState.Closed(1000, "Disconnected"))
-        }
-    }
-    fun destroy() {
-        disconnect()
-        networkCallback?.let {
-            try {
-                connectivityManager.unregisterNetworkCallback(it)
-            } catch (e: Exception) {
-            }
-        }
-        scope.cancel()
-    }
-    private fun openSocket() {
-        val streamUrl = buildStreamUrl(currentBaseUrl, currentToken)
-        Log.d(TAG, "Connecting to: $streamUrl")
-        emit(StreamState.Connecting)
-        val request = Request.Builder()
-            .url(streamUrl)
-            .build()
-        webSocket = okHttpClient.newWebSocket(request, GotifyWebSocketListener())
-    }
-    private fun buildStreamUrl(baseUrl: String, token: String): String {
-        val wsBase = baseUrl
-            .replace("https://", "wss://")
-            .replace("http://", "ws://")
-        return "$wsBase/stream?token=$token"
-    }
-    private fun scheduleReconnect() {
+
+    private fun scheduleReconnect(serverId: Long) {
         val activeNetwork = connectivityManager.activeNetwork
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
         val hasInternet =
             capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
         if (!hasInternet) {
-            Log.w(TAG, "No internet connection, pausing reconnection until network is restored.")
-            emit(StreamState.Error("Waiting for network connection"))
+            Log.w(TAG, "Server $serverId - No internet connection, pausing reconnection.")
+            emit(serverId, StreamState.Error(serverId, "Waiting for network connection"))
             return
         }
-        if (retryAttempt >= MAX_RETRY_ATTEMPTS) {
-            Log.w(TAG, "Max reconnection attempts reached — giving up")
-            emit(StreamState.Error("Connection lost after $MAX_RETRY_ATTEMPTS attempts"))
+
+        val attempt = retryAttempts[serverId] ?: 0
+        if (attempt >= MAX_RETRY_ATTEMPTS) {
+            Log.w(TAG, "Server $serverId - Max reconnection attempts reached")
+            emit(serverId, StreamState.Error(serverId, "Connection lost after $MAX_RETRY_ATTEMPTS attempts"))
             return
         }
-        val delay = (RETRY_BASE_DELAY_MS * (1L shl retryAttempt))
+
+        val delay = (RETRY_BASE_DELAY_MS * (1L shl attempt))
             .coerceAtMost(RETRY_MAX_DELAY_MS)
-        Log.d(TAG, "Reconnecting in ${delay}ms (attempt ${retryAttempt + 1})")
-        retryJob = scope.launch {
+        Log.d(TAG, "Server $serverId - Reconnecting in ${delay}ms (attempt ${attempt + 1})")
+        
+        cancelRetry(serverId)
+        retryJobs[serverId] = scope.launch {
             if (!isActive) return@launch
             delay(delay)
             if (isActive) {
-                retryAttempt++
-                openSocket()
+                retryAttempts[serverId] = attempt + 1
+                connectServer(serverId)
             }
         }
     }
-    private fun cancelRetry() {
-        retryJob?.cancel()
-        retryJob = null
+
+    private fun cancelRetry(serverId: Long) {
+        retryJobs[serverId]?.cancel()
+        retryJobs.remove(serverId)
     }
-    private fun emit(state: StreamState) {
-        _connectionState.value = state
+
+    private fun emit(serverId: Long, state: StreamState) {
+        if (state !is StreamState.Message) {
+            _connectionStates.value = _connectionStates.value.toMutableMap().apply {
+                put(serverId, state)
+            }
+        }
         scope.launch { _streamState.emit(state) }
     }
-    private inner class GotifyWebSocketListener : WebSocketListener() {
+
+    private inner class GotifyWebSocketListener(private val serverId: Long) : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.d(TAG, "WebSocket connected")
-            retryAttempt = 0
-            emit(StreamState.Connected)
+            Log.d(TAG, "Server $serverId - WebSocket connected")
+            retryAttempts[serverId] = 0
+            emit(serverId, StreamState.Connected(serverId))
         }
         override fun onMessage(webSocket: WebSocket, text: String) {
             try {
                 val message = gson.fromJson(text, GotifyMessage::class.java)
-                Log.d(TAG, "Message received: id=${message.id} appId=${message.appId}")
-                emit(StreamState.Message(message))
+                Log.d(TAG, "Server $serverId - Message received: id=${message.id} appId=${message.appId}")
+                emit(serverId, StreamState.Message(serverId, message))
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to parse WebSocket message: $text", e)
+                Log.e(TAG, "Server $serverId - Failed to parse message: $text", e)
             }
         }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (response?.code == 401) {
-                Log.w(TAG, "WebSocket connection unauthorized (401)")
-                onUnauthorizedCallback?.invoke()
+                Log.w(TAG, "Server $serverId - WebSocket unauthorized (401)")
+                unauthorizedCallbacks[serverId]?.invoke()
                 return
             }
             val reason = t.message ?: "Unknown error"
-            Log.w(TAG, "WebSocket failure: $reason — scheduling reconnect")
-            emit(StreamState.Error(reason))
-            scheduleReconnect()
+            Log.w(TAG, "Server $serverId - WebSocket failure: $reason")
+            emit(serverId, StreamState.Error(serverId, reason))
+            scheduleReconnect(serverId)
         }
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "WebSocket closing: $code $reason")
+            Log.d(TAG, "Server $serverId - WebSocket closing: $code $reason")
             webSocket.close(1000, null)
         }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "WebSocket closed: $code $reason")
-            emit(StreamState.Closed(code, reason))
+            Log.d(TAG, "Server $serverId - WebSocket closed: $code $reason")
+            emit(serverId, StreamState.Closed(serverId, code, reason))
             if (code != 1000) {
-                scheduleReconnect()
+                scheduleReconnect(serverId)
             }
         }
     }

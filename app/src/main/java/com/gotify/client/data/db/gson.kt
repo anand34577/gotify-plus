@@ -18,8 +18,10 @@ fun MessageEntity.toDomain(): GotifyMessage = GotifyMessage(
         } catch (e: Exception) {
             null
         }
-    }
+    },
+    tags = tags?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
 )
+@Suppress("SENSELESS_COMPARISON")
 fun GotifyMessage.toEntity(serverId: Long): MessageEntity = MessageEntity(
     id = id,
     serverId = serverId,
@@ -28,7 +30,8 @@ fun GotifyMessage.toEntity(serverId: Long): MessageEntity = MessageEntity(
     message = message,
     priority = priority,
     date = date,
-    extrasJson = extras?.let { gson.toJson(it) }
+    extrasJson = extras?.let { gson.toJson(it) },
+    tags = if (tags == null || tags.isEmpty()) null else tags.joinToString(",")
 )
 fun ApplicationEntity.toDomain(): GotifyApplication = GotifyApplication(
     id = id,

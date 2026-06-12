@@ -85,6 +85,10 @@ class LoginViewModel @Inject constructor(
         }
     }
 
+    fun resetState() {
+        _uiState.update { LoginUiState() }
+    }
+
     fun loginWithPassword(
         serverUrl: String,
         username: String,
@@ -271,16 +275,18 @@ class HomeViewModel @Inject constructor(
     val clientToken: StateFlow<String> = serverManager.activeServer
         .map { it?.clientToken ?: "" }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    val connectionStatus: StateFlow<ConnectionStatus> = webSocketManager.connectionState
-        .map { state ->
-            when (state) {
-                is StreamState.Connected -> ConnectionStatus.CONNECTED
-                is StreamState.Connecting -> ConnectionStatus.CONNECTING
-                is StreamState.Error -> ConnectionStatus.ERROR
-                else -> ConnectionStatus.DISCONNECTED
-            }
+    val connectionStatus: StateFlow<ConnectionStatus> = combine(
+        webSocketManager.connectionStates,
+        serverManager.activeServer
+    ) { states, activeServer ->
+        val activeId = activeServer?.id ?: return@combine ConnectionStatus.DISCONNECTED
+        when (states[activeId]) {
+            is StreamState.Connected -> ConnectionStatus.CONNECTED
+            is StreamState.Connecting -> ConnectionStatus.CONNECTING
+            is StreamState.Error -> ConnectionStatus.ERROR
+            else -> ConnectionStatus.DISCONNECTED
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionStatus.DISCONNECTED)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionStatus.DISCONNECTED)
     private var observedServerId = -1L
     private var messageJob: Job? = null
     private var appJob: Job? = null
@@ -438,6 +444,27 @@ class MessageDetailViewModel @Inject constructor(
             messageDao.deleteMessage(messageId)
             serverManager.apiClient?.let { MessageRepository(it).deleteMessage(messageId) }
             onDeleted()
+        }
+    }
+    fun addTag(tag: String) {
+        viewModelScope.launch {
+            val currentMsg = _message.value ?: return@launch
+            val cleanTag = tag.trim().lowercase()
+            if (cleanTag.isEmpty() || currentMsg.tags.contains(cleanTag)) return@launch
+            val updatedTags = currentMsg.tags + cleanTag
+            val tagsString = updatedTags.joinToString(",")
+            messageDao.updateMessageTags(messageId, tagsString)
+            _message.value = currentMsg.copy(tags = updatedTags)
+        }
+    }
+    fun removeTag(tag: String) {
+        viewModelScope.launch {
+            val currentMsg = _message.value ?: return@launch
+            if (!currentMsg.tags.contains(tag)) return@launch
+            val updatedTags = currentMsg.tags - tag
+            val tagsString = if (updatedTags.isEmpty()) null else updatedTags.joinToString(",")
+            messageDao.updateMessageTags(messageId, tagsString)
+            _message.value = currentMsg.copy(tags = updatedTags)
         }
     }
 }
@@ -602,7 +629,8 @@ class SettingsViewModel @Inject constructor(
             themeSelection       = userPrefs.themeSelection,
             serverName           = server?.name ?: "",
             serverUrl            = server?.baseUrl ?: "",
-            appVersion           = "1.0.0"
+            appVersion           = "1.0.0",
+            autoPurgeDays        = userPrefs.autoPurgeDays
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsState())
     fun setNotifications(v: Boolean) = viewModelScope.launch { prefs.setNotificationsEnabled(v) }
@@ -618,6 +646,7 @@ class SettingsViewModel @Inject constructor(
     fun setDarkTheme(v: Boolean) = viewModelScope.launch { prefs.setDarkThemeEnabled(v) }
     fun setMarkdown(v: Boolean)      = viewModelScope.launch { prefs.setMarkdownEnabled(v) }
     fun setKeepAlive(v: Boolean)     = viewModelScope.launch { prefs.setKeepAliveEnabled(v) }
+    fun setAutoPurgeDays(days: Int)  = viewModelScope.launch { prefs.setAutoPurgeDays(days) }
     fun setThemeSelection(theme: String) = viewModelScope.launch { prefs.setThemeSelection(theme) }
     fun logout(onLoggedOut: () -> Unit) {
         viewModelScope.launch {
@@ -693,6 +722,13 @@ data class AppInboxUiState(
     val appImageUrl: String? = null,
     val isLoading: Boolean = true
 )
+data class SearchFilterParams(
+    val query: String,
+    val priority: String,
+    val appId: Int,
+    val dateFilter: String
+)
+
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val messageDao: MessageDao,
@@ -701,25 +737,86 @@ class SearchViewModel @Inject constructor(
 ) : ViewModel() {
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
-    val searchResults: StateFlow<List<GotifyMessage>> = _query
-        .debounce(300)
-        .flatMapLatest { q ->
-            val serverId =
-                serverManager.activeServer.value?.id ?: return@flatMapLatest flowOf(emptyList())
-            if (q.isBlank()) flowOf(emptyList())
-            else messageDao.searchMessages(serverId, q).map { it.map { e -> e.toDomain() } }
+
+    private val _selectedPriority = MutableStateFlow("All") // "All", "High", "Normal", "Low"
+    val selectedPriority: StateFlow<String> = _selectedPriority.asStateFlow()
+
+    private val _selectedAppId = MutableStateFlow(-1) // -1 means all
+    val selectedAppId: StateFlow<Int> = _selectedAppId.asStateFlow()
+
+    private val _selectedDateFilter = MutableStateFlow("Anytime") // "Anytime", "24h", "7d"
+    val selectedDateFilter: StateFlow<String> = _selectedDateFilter.asStateFlow()
+
+    val searchResults: StateFlow<List<GotifyMessage>> = combine(
+        _query.debounce(300),
+        _selectedPriority,
+        _selectedAppId,
+        _selectedDateFilter
+    ) { q, priority, appId, dateFilter ->
+        SearchFilterParams(q, priority, appId, dateFilter)
+    }.flatMapLatest { params ->
+        val serverId = serverManager.activeServer.value?.id ?: return@flatMapLatest flowOf(emptyList())
+        if (params.query.isBlank()) return@flatMapLatest flowOf(emptyList())
+        
+        messageDao.searchMessages(serverId, params.query).map { entities ->
+            entities.map { it.toDomain() }.filter { msg ->
+                val priorityMatch = when (params.priority) {
+                    "High" -> msg.priority >= 8
+                    "Normal" -> msg.priority in 4..7
+                    "Low" -> msg.priority <= 3
+                    else -> true
+                }
+                
+                val appMatch = params.appId == -1 || msg.appId == params.appId
+                
+                val dateMatch = when (params.dateFilter) {
+                    "24h" -> {
+                        val limit = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+                        parseIsoDateToMillis(msg.date) >= limit
+                    }
+                    "7d" -> {
+                        val limit = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+                        parseIsoDateToMillis(msg.date) >= limit
+                    }
+                    else -> true
+                }
+                priorityMatch && appMatch && dateMatch
+            }
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     val applications: StateFlow<Map<Int, GotifyApplication>> = serverManager.activeServer
         .filterNotNull()
         .flatMapLatest { server -> applicationDao.getApplications(server.id) }
         .map { entities -> entities.associate { it.id to it.toDomain() } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     fun setQuery(q: String) {
         _query.value = q
     }
+
     fun clearQuery() {
         _query.value = ""
+    }
+
+    fun setPriority(p: String) {
+        _selectedPriority.value = p
+    }
+
+    fun setAppId(id: Int) {
+        _selectedAppId.value = id
+    }
+
+    fun setDateFilter(f: String) {
+        _selectedDateFilter.value = f
+    }
+
+    private fun parseIsoDateToMillis(isoString: String): Long {
+        return try {
+            java.time.Instant.parse(isoString).toEpochMilli()
+        } catch (e: Exception) {
+            0L
+        }
     }
 }
 @HiltViewModel
@@ -732,16 +829,18 @@ class ServersViewModel @Inject constructor(
     val servers: StateFlow<List<GotifyServer>> = serverDao.getAllServers()
         .map { it.map { e -> e.toDomain() } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val connectionStatus: StateFlow<ConnectionStatus> = webSocketManager.connectionState
-        .map { state ->
-            when (state) {
-                is StreamState.Connected -> ConnectionStatus.CONNECTED
-                is StreamState.Connecting -> ConnectionStatus.CONNECTING
-                is StreamState.Error -> ConnectionStatus.ERROR
-                else -> ConnectionStatus.DISCONNECTED
-            }
+    val connectionStatus: StateFlow<ConnectionStatus> = combine(
+        webSocketManager.connectionStates,
+        serverManager.activeServer
+    ) { states, activeServer ->
+        val activeId = activeServer?.id ?: return@combine ConnectionStatus.DISCONNECTED
+        when (states[activeId]) {
+            is StreamState.Connected -> ConnectionStatus.CONNECTED
+            is StreamState.Connecting -> ConnectionStatus.CONNECTING
+            is StreamState.Error -> ConnectionStatus.ERROR
+            else -> ConnectionStatus.DISCONNECTED
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionStatus.DISCONNECTED)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionStatus.DISCONNECTED)
     fun switchServer(serverId: Long) {
         viewModelScope.launch {
             serverDao.switchActiveServer(serverId)
@@ -749,6 +848,13 @@ class ServersViewModel @Inject constructor(
             serverManager.switchServer(serverId)
         }
     }
+
+    fun deleteServer(serverId: Long) {
+        viewModelScope.launch {
+            serverManager.removeServer(serverId)
+        }
+    }
+
     fun removeServer(serverId: Long) {
         viewModelScope.launch {
             serverDao.deleteServer(serverId)

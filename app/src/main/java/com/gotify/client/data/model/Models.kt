@@ -43,7 +43,8 @@ data class GotifyMessage(
     @SerializedName("title") val title: String,
     @SerializedName("priority") val priority: Int,
     @SerializedName("date") val date: String,
-    @SerializedName("extras") val extras: MessageExtras? = null
+    @SerializedName("extras") val extras: MessageExtras? = null,
+    val tags: List<String> = emptyList()
 )
 data class MessageExtras(
     @SerializedName("client::display") val display: ClientDisplay? = null,
@@ -89,11 +90,11 @@ data class UpdateUserRequest(
     @SerializedName("admin") val admin: Boolean? = null
 )
 sealed class StreamState {
-    object Connecting : StreamState()
-    object Connected : StreamState()
-    data class Message(val message: GotifyMessage) : StreamState()
-    data class Error(val reason: String) : StreamState()
-    data class Closed(val code: Int, val reason: String) : StreamState()
+    data class Connecting(val serverId: Long) : StreamState()
+    data class Connected(val serverId: Long) : StreamState()
+    data class Message(val serverId: Long, val message: GotifyMessage) : StreamState()
+    data class Error(val serverId: Long, val reason: String) : StreamState()
+    data class Closed(val serverId: Long, val code: Int, val reason: String) : StreamState()
 }
 sealed class ApiResult<out T> {
     data class Success<T>(val data: T) : ApiResult<T>()

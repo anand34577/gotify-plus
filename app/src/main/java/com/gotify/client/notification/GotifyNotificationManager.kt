@@ -82,7 +82,8 @@ class GotifyNotificationManager @Inject constructor(
     fun postMessageNotification(
         message: GotifyMessage,
         app: GotifyApplication?,
-        tapIntent: PendingIntent
+        tapIntent: PendingIntent,
+        unreadCount: Int = 0
     ) {
         if (message.priority == 0) return
         val userPrefs = runBlocking { prefs.userPreferences.first() }
@@ -97,6 +98,7 @@ class GotifyNotificationManager @Inject constructor(
             else -> highSilentChannelId(app.id)
         }
         val builder = NotificationCompat.Builder(context, channelId)
+            .setNumber(unreadCount)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(message.title.ifBlank { appName })
             .setContentText(message.message)

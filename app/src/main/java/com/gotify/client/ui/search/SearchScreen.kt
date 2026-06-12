@@ -1,5 +1,6 @@
 package com.gotify.client.ui.search
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,18 +11,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,7 +40,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -52,14 +62,21 @@ import com.gotify.client.ui.components.EmptyState
 import com.gotify.client.ui.components.PriorityBadge
 import com.gotify.client.ui.components.RelativeTime
 import com.gotify.client.ui.components.SectionHeader
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     query: String,
     results: List<GotifyMessage>,
     applications: Map<Int, GotifyApplication>,
+    selectedPriority: String,
+    selectedAppId: Int,
+    selectedDateFilter: String,
     onQueryChange: (String) -> Unit,
     onClearQuery: () -> Unit,
+    onPriorityChange: (String) -> Unit,
+    onAppIdChange: (Int) -> Unit,
+    onDateFilterChange: (String) -> Unit,
     onBack: () -> Unit,
     onMessageClick: (GotifyMessage) -> Unit,
     modifier: Modifier = Modifier
@@ -111,53 +128,180 @@ fun SearchScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            when {
-                query.isBlank() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        EmptyState(
-                            icon = Icons.Outlined.Search,
-                            title = "Search messages",
-                            subtitle = "Search by title or message content"
-                        )
-                    }
-                }
-                results.isEmpty() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        EmptyState(
-                            icon = Icons.Outlined.SearchOff,
-                            title = "No results for \"$query\"",
-                            subtitle = "Try a different search term"
-                        )
-                    }
-                }
-                else -> {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        item {
-                            SectionHeader(
-                                title = "${results.size} result${if (results.size != 1) "s" else ""}",
-                                modifier = Modifier.padding(bottom = 4.dp)
+            SearchFiltersRow(
+                applications = applications,
+                selectedPriority = selectedPriority,
+                selectedAppId = selectedAppId,
+                selectedDateFilter = selectedDateFilter,
+                onPriorityChange = onPriorityChange,
+                onAppIdChange = onAppIdChange,
+                onDateFilterChange = onDateFilterChange,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when {
+                    query.isBlank() -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            EmptyState(
+                                icon = Icons.Outlined.Search,
+                                title = "Search messages",
+                                subtitle = "Search by title or message content"
                             )
                         }
-                        items(results, key = { it.id }) { message ->
-                            val app = applications[message.appId]
-                            SearchResultCard(
-                                message = message,
-                                appName = app?.name ?: "App ${message.appId}",
-                                appImageUrl = app?.image,
-                                query = query,
-                                onClick = { onMessageClick(message) }
+                    }
+                    results.isEmpty() -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            EmptyState(
+                                icon = Icons.Outlined.SearchOff,
+                                title = "No results for \"$query\"",
+                                subtitle = "Try a different search term or change filters"
                             )
                         }
-                        item { Spacer(Modifier.height(80.dp)) }
                     }
+                    else -> {
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            item {
+                                SectionHeader(
+                                    title = "${results.size} result${if (results.size != 1) "s" else ""}",
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                )
+                            }
+                            items(results, key = { it.id }) { message ->
+                                val app = applications[message.appId]
+                                SearchResultCard(
+                                    message = message,
+                                    appName = app?.name ?: "App ${message.appId}",
+                                    appImageUrl = app?.image,
+                                    query = query,
+                                    onClick = { onMessageClick(message) }
+                                )
+                            }
+                            item { Spacer(Modifier.height(80.dp)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchFiltersRow(
+    applications: Map<Int, GotifyApplication>,
+    selectedPriority: String,
+    selectedAppId: Int,
+    selectedDateFilter: String,
+    onPriorityChange: (String) -> Unit,
+    onAppIdChange: (Int) -> Unit,
+    onDateFilterChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showPriorityMenu by remember { mutableStateOf(false) }
+    var showAppMenu by remember { mutableStateOf(false) }
+    var showDateMenu by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Priority Filter
+        Box {
+            FilterChip(
+                selected = selectedPriority != "All",
+                onClick = { showPriorityMenu = true },
+                label = { Text(if (selectedPriority == "All") "Priority: All" else "Priority: $selectedPriority", style = MaterialTheme.typography.labelMedium) },
+                trailingIcon = { Icon(Icons.Default.ArrowDropDown, null, Modifier.size(16.dp)) },
+                shape = RoundedCornerShape(16.dp)
+            )
+            DropdownMenu(
+                expanded = showPriorityMenu,
+                onDismissRequest = { showPriorityMenu = false }
+            ) {
+                listOf("All", "Low", "Normal", "High").forEach { p ->
+                    DropdownMenuItem(
+                        text = { Text(p, style = MaterialTheme.typography.bodyMedium) },
+                        onClick = {
+                            onPriorityChange(p)
+                            showPriorityMenu = false
+                        }
+                    )
+                }
+            }
+        }
+
+        // App Filter
+        Box {
+            val selectedAppName = if (selectedAppId == -1) "All Apps" else applications[selectedAppId]?.name ?: "Unknown App"
+            FilterChip(
+                selected = selectedAppId != -1,
+                onClick = { showAppMenu = true },
+                label = { Text(selectedAppName, style = MaterialTheme.typography.labelMedium) },
+                trailingIcon = { Icon(Icons.Default.ArrowDropDown, null, Modifier.size(16.dp)) },
+                shape = RoundedCornerShape(16.dp)
+            )
+            DropdownMenu(
+                expanded = showAppMenu,
+                onDismissRequest = { showAppMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("All Apps", style = MaterialTheme.typography.bodyMedium) },
+                    onClick = {
+                        onAppIdChange(-1)
+                        showAppMenu = false
+                    }
+                )
+                applications.values.forEach { app ->
+                    DropdownMenuItem(
+                        text = { Text(app.name, style = MaterialTheme.typography.bodyMedium) },
+                        onClick = {
+                            onAppIdChange(app.id)
+                            showAppMenu = false
+                        }
+                    )
+                }
+            }
+        }
+
+        // Date Filter
+        Box {
+            val dateLabel = when (selectedDateFilter) {
+                "24h" -> "Last 24 hours"
+                "7d" -> "Last 7 days"
+                else -> "Date: Anytime"
+            }
+            FilterChip(
+                selected = selectedDateFilter != "Anytime",
+                onClick = { showDateMenu = true },
+                label = { Text(dateLabel, style = MaterialTheme.typography.labelMedium) },
+                trailingIcon = { Icon(Icons.Default.ArrowDropDown, null, Modifier.size(16.dp)) },
+                shape = RoundedCornerShape(16.dp)
+            )
+            DropdownMenu(
+                expanded = showDateMenu,
+                onDismissRequest = { showDateMenu = false }
+            ) {
+                listOf("Anytime" to "Anytime", "24h" to "Last 24 hours", "7d" to "Last 7 days").forEach { (value, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label, style = MaterialTheme.typography.bodyMedium) },
+                        onClick = {
+                            onDateFilterChange(value)
+                            showDateMenu = false
+                        }
+                    )
                 }
             }
         }

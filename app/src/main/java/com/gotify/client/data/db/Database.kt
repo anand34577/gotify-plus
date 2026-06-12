@@ -40,7 +40,8 @@ data class MessageEntity(
     val date: String,
     val extrasJson: String? = null,
     val isRead: Boolean = false,
-    val cachedAt: Long = System.currentTimeMillis()
+    val cachedAt: Long = System.currentTimeMillis(),
+    val tags: String? = null
 )
 @Entity(tableName = "applications")
 data class ApplicationEntity(
@@ -140,6 +141,12 @@ interface MessageDao {
     suspend fun deleteAllMessages(serverId: Long)
     @Query("DELETE FROM messages WHERE cachedAt < :olderThan")
     suspend fun evictOldMessages(olderThan: Long)
+    @Query("UPDATE messages SET tags = :tags WHERE id = :id")
+    suspend fun updateMessageTags(id: Long, tags: String?)
+    @Query("SELECT COUNT(*) FROM messages WHERE isRead = 0")
+    fun getTotalUnreadCountFlow(): Flow<Int>
+    @Query("SELECT COUNT(*) FROM messages WHERE isRead = 0")
+    suspend fun getTotalUnreadCount(): Int
 }
 @Dao
 interface ApplicationDao {
@@ -162,7 +169,7 @@ interface ApplicationDao {
         MessageEntity::class,
         ApplicationEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class GotifyDatabase : RoomDatabase() {

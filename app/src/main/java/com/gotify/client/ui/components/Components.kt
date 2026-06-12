@@ -328,6 +328,8 @@ suspend fun SnackbarHostState.showError(message: String) =
     showSnackbar(message = message, duration = SnackbarDuration.Long, actionLabel = "Dismiss")
 */
 package com.gotify.client.ui.components
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -547,6 +549,7 @@ fun MessageCard(
     clientToken: String = "",
     priority: Int,
     date: String,
+    tags: List<String> = emptyList(),
     onClick: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
@@ -616,6 +619,28 @@ fun MessageCard(
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = 20.sp
             )
+            if (tags.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    tags.forEach { tag ->
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = "#$tag",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

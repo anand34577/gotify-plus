@@ -69,11 +69,14 @@ fun PublishMessageSheet(
         }
     }
 
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = {
             onResetState()
             onDismiss()
-        }
+        },
+        sheetState = sheetState
     ) {
         Column(
             modifier = Modifier
