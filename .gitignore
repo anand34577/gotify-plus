@@ -2,72 +2,56 @@
 .gradle/
 build/
 */build/
-
 # Local config
 local.properties
-
 # Android Studio / IntelliJ
 .idea/
 *.iml
-
 # Kotlin
 .kotlin/
-
 # OS files
 .DS_Store
 Thumbs.db
-
 # Log files
 *.log
-
 # Temporary files
 *.tmp
 *.temp
 *.swp
 *.swo
 *~
-
 # Generated APK / AAB
 *.apk
 *.aab
 *.ap_
 *.aar
-
 # Dex / compiled output
 *.dex
 *.class
-
 # Native / packaged outputs
 *.so
-
 # Signing files
 *.jks
 *.keystore
 *.p12
 *.pem
-
 # Firebase / Google service local overrides if any
 google-services.json
-
 # Fastlane / screenshots / reports (only if generated locally)
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/
 fastlane/test_output/
-
 # Android captures
 captures/
-
 # NDK
 .externalNativeBuild/
 .cxx/
-
 # Navigation / build intermediates / generated outputs
 .navigation/
 outputs/
 bin/
 gen/
-
 # Mac / Windows metadata
 ehthumbs.db
 Desktop.ini

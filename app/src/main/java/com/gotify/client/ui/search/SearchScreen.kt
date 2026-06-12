@@ -1,15 +1,39 @@
 package com.gotify.client.ui.search
-
-import androidx.compose.animation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.Clear
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SearchOff
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -23,8 +47,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
-import com.gotify.client.ui.components.*
-
+import com.gotify.client.ui.components.AppIcon
+import com.gotify.client.ui.components.EmptyState
+import com.gotify.client.ui.components.PriorityBadge
+import com.gotify.client.ui.components.RelativeTime
+import com.gotify.client.ui.components.SectionHeader
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
@@ -38,39 +65,37 @@ fun SearchScreen(
     modifier: Modifier = Modifier
 ) {
     val focusRequester = remember { FocusRequester() }
-
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
-
     Scaffold(
         modifier = modifier,
-        topBar   = {
+        topBar = {
             TopAppBar(
                 title = {
                     OutlinedTextField(
-                        value         = query,
+                        value = query,
                         onValueChange = onQueryChange,
-                        modifier      = Modifier
+                        modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(focusRequester),
-                        placeholder   = { Text("Search messages…") },
-                        singleLine    = true,
+                        placeholder = { Text("Search messages…") },
+                        singleLine = true,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Text,
-                            imeAction    = ImeAction.Search
+                            imeAction = ImeAction.Search
                         ),
-                        trailingIcon  = {
+                        trailingIcon = {
                             AnimatedVisibility(visible = query.isNotEmpty()) {
                                 IconButton(onClick = onClearQuery) {
                                     Icon(Icons.Outlined.Clear, "Clear")
                                 }
                             }
                         },
-                        shape  = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                            focusedBorderColor   = MaterialTheme.colorScheme.primary
+                            focusedBorderColor = MaterialTheme.colorScheme.primary
                         )
                     )
                 },
@@ -86,36 +111,30 @@ fun SearchScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
             when {
-
                 query.isBlank() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         EmptyState(
-                            icon     = Icons.Outlined.Search,
-                            title    = "Search messages",
+                            icon = Icons.Outlined.Search,
+                            title = "Search messages",
                             subtitle = "Search by title or message content"
                         )
                     }
                 }
-
-
                 results.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         EmptyState(
-                            icon     = Icons.Outlined.SearchOff,
-                            title    = "No results for \"$query\"",
+                            icon = Icons.Outlined.SearchOff,
+                            title = "No results for \"$query\"",
                             subtitle = "Try a different search term"
                         )
                     }
                 }
-
-
                 else -> {
                     LazyColumn(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
@@ -127,15 +146,14 @@ fun SearchScreen(
                                 modifier = Modifier.padding(bottom = 4.dp)
                             )
                         }
-
                         items(results, key = { it.id }) { message ->
                             val app = applications[message.appId]
                             SearchResultCard(
-                                message     = message,
-                                appName     = app?.name ?: "App ${message.appId}",
+                                message = message,
+                                appName = app?.name ?: "App ${message.appId}",
                                 appImageUrl = app?.image,
-                                query       = query,
-                                onClick     = { onMessageClick(message) }
+                                query = query,
+                                onClick = { onMessageClick(message) }
                             )
                         }
                         item { Spacer(Modifier.height(80.dp)) }
@@ -145,9 +163,6 @@ fun SearchScreen(
         }
     }
 }
-
-
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchResultCard(
@@ -159,63 +174,56 @@ private fun SearchResultCard(
     modifier: Modifier = Modifier
 ) {
     Card(
-        onClick   = onClick,
-        modifier  = modifier.fillMaxWidth(),
-        shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
-                verticalAlignment     = Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 AppIcon(imageUrl = appImageUrl, appName = appName, size = 28.dp)
                 Text(
-                    text       = appName,
-                    style      = MaterialTheme.typography.labelMedium,
-                    color      = MaterialTheme.colorScheme.primary,
+                    text = appName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
-                    modifier   = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f)
                 )
                 PriorityBadge(priority = message.priority)
                 RelativeTime(isoDate = message.date)
             }
-
             Spacer(Modifier.height(8.dp))
-
             if (message.title.isNotBlank()) {
                 Text(
-                    text       = highlightQuery(message.title, query),
-                    style      = MaterialTheme.typography.titleSmall,
+                    text = highlightQuery(message.title, query),
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines   = 1
+                    maxLines = 1
                 )
                 Spacer(Modifier.height(4.dp))
             }
-
             Text(
-                text     = highlightQuery(message.message, query),
-                style    = MaterialTheme.typography.bodySmall,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = highlightQuery(message.message, query),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2
             )
         }
     }
 }
-
-
-
 @Composable
 private fun highlightQuery(text: String, query: String) = buildAnnotatedString {
     if (query.isBlank()) {
         append(text)
         return@buildAnnotatedString
     }
-    val lowerText  = text.lowercase()
+    val lowerText = text.lowercase()
     val lowerQuery = query.lowercase()
     var start = 0
-
     while (start < text.length) {
         val idx = lowerText.indexOf(lowerQuery, start)
         if (idx == -1) {
@@ -226,7 +234,7 @@ private fun highlightQuery(text: String, query: String) = buildAnnotatedString {
         withStyle(
             SpanStyle(
                 background = MaterialTheme.colorScheme.primaryContainer,
-                color      = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold
             )
         ) {

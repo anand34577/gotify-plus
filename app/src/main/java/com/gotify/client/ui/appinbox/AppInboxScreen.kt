@@ -1,5 +1,4 @@
 package com.gotify.client.ui.appinbox
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -39,12 +38,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gotify.client.data.model.GotifyMessage
-import com.gotify.client.ui.components.AppIcon
 import com.gotify.client.ui.components.EmptyState
 import com.gotify.client.ui.components.MessageCard
 import com.gotify.client.ui.components.MessageCardSkeleton
 import com.gotify.client.ui.components.SectionHeader
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppInboxScreen(
@@ -60,7 +57,6 @@ fun AppInboxScreen(
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
     val pullState = rememberPullToRefreshState()
-
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -70,7 +66,6 @@ fun AppInboxScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-
                         Text(appName, fontWeight = FontWeight.Bold)
                     }
                 },
@@ -97,7 +92,6 @@ fun AppInboxScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-
         PullToRefreshBox(
             isRefreshing = false,
             onRefresh = {},
@@ -149,7 +143,6 @@ fun AppInboxScreen(
             }
         }
     }
-
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },

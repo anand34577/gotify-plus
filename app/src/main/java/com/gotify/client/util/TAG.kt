@@ -1,11 +1,8 @@
 package com.gotify.client.util
-
 import android.util.Log
 import com.gotify.client.data.model.ApiResult
 import retrofit2.Response
-
 private const val TAG = "ApiCall"
-
 suspend fun <T> safeApiCall(call: suspend () -> Response<T>): ApiResult<T> {
     return try {
         val response = call()
@@ -14,7 +11,6 @@ suspend fun <T> safeApiCall(call: suspend () -> Response<T>): ApiResult<T> {
             if (body != null) {
                 ApiResult.Success(body)
             } else {
-
                 ApiResult.Error(response.code(), "Empty response body")
             }
         } else {
@@ -27,8 +23,6 @@ suspend fun <T> safeApiCall(call: suspend () -> Response<T>): ApiResult<T> {
         ApiResult.Error(null, e.message ?: "Network error")
     }
 }
-
-
 suspend fun safeApiCallUnit(call: suspend () -> Response<Unit>): ApiResult<Unit> {
     return try {
         val response = call()
@@ -43,8 +37,6 @@ suspend fun safeApiCallUnit(call: suspend () -> Response<Unit>): ApiResult<Unit>
         ApiResult.Error(null, e.message ?: "Network error")
     }
 }
-
-
 private fun parseErrorMessage(raw: String): String {
     return try {
         val regex = """"errorDescription"\s*:\s*"([^"]+)"""".toRegex()
