@@ -84,6 +84,10 @@ import com.gotify.client.ui.theme.GotifyBlue
 fun LoginScreen(
     isLoading: Boolean,
     errorMessage: String?,
+    serverVersion: String?,
+    serverVersionError: String?,
+    isCheckingServer: Boolean,
+    onServerUrlChanged: (String) -> Unit,
     onLoginWithPassword: (serverUrl: String, username: String, password: String, serverName: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -94,8 +98,15 @@ fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     // Grouped Focus Requesters
     val (urlFocus, nameFocus, userFocus, passFocus) = remember { FocusRequester.createRefs() }
-    val canSubmit by remember(serverUrl, username, password, isLoading) {
-        derivedStateOf { serverUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank() && !isLoading }
+    val canSubmit by remember(serverUrl, username, password, isLoading, isCheckingServer, serverVersionError) {
+        derivedStateOf {
+            serverUrl.isNotBlank() &&
+            username.isNotBlank() &&
+            password.isNotBlank() &&
+            !isLoading &&
+            !isCheckingServer &&
+            serverVersionError == null
+        }
     }
     fun submit() {
         if (canSubmit) onLoginWithPassword(
@@ -184,7 +195,10 @@ fun LoginScreen(
                     FieldGroup(label = "SERVER DETAILS") {
                         LoginField(
                             value = serverUrl,
-                            onValueChange = { serverUrl = it },
+                            onValueChange = {
+                                serverUrl = it
+                                onServerUrlChanged(it)
+                            },
                             label = "Server URL",
                             placeholder = "https://gotify.example.com",
                             icon = Icons.Outlined.Language,
@@ -193,6 +207,30 @@ fun LoginScreen(
                             onNext = { nameFocus.requestFocus() },
                             modifier = Modifier.focusRequester(urlFocus)
                         )
+                        if (isCheckingServer) {
+                            Text(
+                                text = "Checking server status...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                            )
+                        } else if (serverVersion != null) {
+                            Text(
+                                text = serverVersion,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF4CAF50),
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                            )
+                        } else if (serverVersionError != null) {
+                            Text(
+                                text = serverVersionError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AccentRed,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                            )
+                        }
                         LoginField(
                             value = serverName,
                             onValueChange = { serverName = it },

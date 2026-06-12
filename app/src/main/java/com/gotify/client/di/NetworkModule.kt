@@ -26,11 +26,6 @@ object NetworkModule {
         @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
         gson: Gson
     ): GotifyWebSocketManager = GotifyWebSocketManager(gson, context)
-    @Provides
-    @Singleton
-    fun provideServerManager(
-        webSocketManager: GotifyWebSocketManager
-    ): ServerManager = ServerManager(webSocketManager)
 }
 @Module
 @InstallIn(SingletonComponent::class)

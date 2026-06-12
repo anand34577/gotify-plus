@@ -2,6 +2,7 @@ package com.gotify.client.ui.viewmodel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.os.Build
 import com.gotify.client.data.api.GotifyWebSocketManager
 import com.gotify.client.data.api.NetworkClientFactory
 import com.gotify.client.data.api.buildBasicAuth
@@ -28,6 +29,7 @@ import com.gotify.client.util.safeApiCall
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +73,18 @@ class LoginViewModel @Inject constructor(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            serverManager.unauthorizedMessage.collect { msg ->
+                if (msg != null) {
+                    _uiState.update { it.copy(errorMessage = msg) }
+                    serverManager.clearUnauthorizedMessage()
+                }
+            }
+        }
+    }
+
     fun loginWithPassword(
         serverUrl: String,
         username: String,
@@ -105,9 +119,15 @@ class LoginViewModel @Inject constructor(
                 }
                 return@launch
             }
+            val deviceName = if (Build.MODEL.startsWith(Build.MANUFACTURER, ignoreCase = true)) {
+                Build.MODEL
+            } else {
+                "${Build.MANUFACTURER} ${Build.MODEL}"
+            }
+            val clientName = "GotifyPlus ($deviceName)"
             val authResult = safeApiCall {
                 tempApi.auth.createClient(
-                    LoginRequest("GotifyPlus Android"),
+                    LoginRequest(clientName),
                     buildBasicAuth(username, password)
                 )
             }
@@ -177,6 +197,50 @@ class LoginViewModel @Inject constructor(
             }
         }
     }
+    private var checkServerJob: Job? = null
+    fun checkServerUrl(url: String) {
+        checkServerJob?.cancel()
+        if (url.isBlank()) {
+            _uiState.update { it.copy(serverVersion = null, serverVersionError = null, isCheckingServer = false) }
+            return
+        }
+        _uiState.update { it.copy(isCheckingServer = true, serverVersion = null, serverVersionError = null) }
+        checkServerJob = viewModelScope.launch {
+            delay(600)
+            val trimmedUrl = url.trim().trimEnd('/')
+            if (!trimmedUrl.startsWith("http://", ignoreCase = true) &&
+                !trimmedUrl.startsWith("https://", ignoreCase = true)
+            ) {
+                _uiState.update {
+                    it.copy(
+                        isCheckingServer = false,
+                        serverVersionError = "URL must start with http:// or https://"
+                    )
+                }
+                return@launch
+            }
+            val tempServer = GotifyServer(name = "", baseUrl = trimmedUrl, clientToken = "")
+            val tempApi = NetworkClientFactory.create(tempServer)
+            val versionResult = safeApiCall { tempApi.server.getVersion() }
+            if (versionResult is ApiResult.Success) {
+                _uiState.update {
+                    it.copy(
+                        isCheckingServer = false,
+                        serverVersion = "Gotify Server v${versionResult.data.version}",
+                        serverVersionError = null
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isCheckingServer = false,
+                        serverVersion = null,
+                        serverVersionError = "Not a valid Gotify server URL"
+                    )
+                }
+            }
+        }
+    }
     private suspend fun saveAndActivate(server: GotifyServer, clientId: Int) {
         serverDao.deactivateAll()
         val newId = serverDao.insertServer(server.toEntity(clientId).copy(isActive = true))
@@ -187,7 +251,10 @@ class LoginViewModel @Inject constructor(
 data class LoginUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val loginSuccess: Boolean = false
+    val loginSuccess: Boolean = false,
+    val serverVersion: String? = null,
+    val serverVersionError: String? = null,
+    val isCheckingServer: Boolean = false
 )
 @HiltViewModel
 class HomeViewModel @Inject constructor(
