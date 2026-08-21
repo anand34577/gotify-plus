@@ -9,25 +9,29 @@ import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.net.toUri
 import com.gotify.client.data.datastore.PreferencesRepository
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
+import com.gotify.client.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class GotifyNotificationManager @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val prefs: PreferencesRepository
 ) {
     companion object {
         const val CHANNEL_FOREGROUND    = "gotify_foreground"
         const val CHANNEL_DEFAULT       = "gotify_default"
+        const val CHANNEL_HIGH_FALLBACK = "gotify_high"
         private  const val PREFIX       = "app_"
         const val NOTIFICATION_ID_FOREGROUND = 1
     }
@@ -36,48 +40,53 @@ class GotifyNotificationManager @Inject constructor(
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     fun createBaseChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         createChannel(
             id         = CHANNEL_FOREGROUND,
-            name       = "Background connection",
+            name       = context.getString(R.string.notification_channel_foreground),
             importance = NotificationManager.IMPORTANCE_MIN,
             sound      = false,
             vibrate    = false
         )
         createChannel(
             id         = CHANNEL_DEFAULT,
-            name       = "Gotify notifications",
+            name       = context.getString(R.string.notification_channel_default),
             importance = NotificationManager.IMPORTANCE_DEFAULT,
             sound      = true,
             vibrate    = false
         )
+        createChannel(
+            id         = CHANNEL_HIGH_FALLBACK,
+            name       = context.getString(R.string.notification_channel_high),
+            importance = NotificationManager.IMPORTANCE_HIGH,
+            sound      = true,
+            vibrate    = true
+        )
     }
 
-    fun createAppChannels(app: GotifyApplication) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    fun createAppChannels(serverId: Long, app: GotifyApplication) {
         createChannel(
-            id         = lowChannelId(app.id),
+            id         = lowChannelId(serverId, app.id),
             name       = "${app.name} — Low",
             importance = NotificationManager.IMPORTANCE_LOW,
             sound      = false,
             vibrate    = false
         )
         createChannel(
-            id         = normalChannelId(app.id),
+            id         = normalChannelId(serverId, app.id),
             name       = app.name,
             importance = NotificationManager.IMPORTANCE_DEFAULT,
             sound      = true,
             vibrate    = false
         )
         createChannel(
-            id         = highVibrateChannelId(app.id),
+            id         = highVibrateChannelId(serverId, app.id),
             name       = "${app.name} — High",
             importance = NotificationManager.IMPORTANCE_HIGH,
             sound      = true,
             vibrate    = true
         )
         createChannel(
-            id         = highSilentChannelId(app.id),
+            id         = highSilentChannelId(serverId, app.id),
             name       = "${app.name} — High (silent)",
             importance = NotificationManager.IMPORTANCE_HIGH,
             sound      = true,
@@ -85,39 +94,41 @@ class GotifyNotificationManager @Inject constructor(
         )
     }
 
-    fun postMessageNotification(
+    suspend fun postMessageNotification(
         message:   GotifyMessage,
         app:       GotifyApplication?,
-        tapIntent: PendingIntent
+        tapIntent: PendingIntent,
+        serverId:  Long
     ) {
-        if (message.priority == 0) return
-        val userPrefs = runBlocking { prefs.userPreferences.first() }
+        if (message.priority <= 0) return
+        val userPrefs = prefs.userPreferences.first()
         if (!userPrefs.notificationsEnabled) return
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED) return
 
         val priority  = Priority.fromInt(message.priority)
         val appName   = app?.name ?: "Gotify"
 
         val channelId = when {
-            app == null              -> CHANNEL_DEFAULT
-            priority == Priority.LOW    -> lowChannelId(app.id)
-            priority == Priority.NORMAL -> normalChannelId(app.id)
-            userPrefs.vibrationEnabled  -> highVibrateChannelId(app.id)
-            else                        -> highSilentChannelId(app.id)
+            app == null && priority != Priority.HIGH -> CHANNEL_DEFAULT
+            app == null -> CHANNEL_HIGH_FALLBACK
+            priority == Priority.LOW    -> lowChannelId(serverId, app.id)
+            priority == Priority.NORMAL -> normalChannelId(serverId, app.id)
+            userPrefs.vibrationEnabled  -> highVibrateChannelId(serverId, app.id)
+            else                        -> highSilentChannelId(serverId, app.id)
         }
 
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(message.title.ifBlank { appName })
             .setContentText(message.message)
             .setSubText(appName)
             .setContentIntent(tapIntent)
             .setAutoCancel(true)
-            .setGroup("gotify_${app?.id ?: 0}")
+            .setGroup("gotify_${serverId}_${app?.id ?: 0}")
             .setPriority(priority.notifCompat)
-            .setCategory(
-                if (priority == Priority.HIGH) NotificationCompat.CATEGORY_ALARM
-                else NotificationCompat.CATEGORY_MESSAGE
-            )
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
 
         if (message.message.length > 80) {
             builder.setStyle(
@@ -127,26 +138,31 @@ class GotifyNotificationManager @Inject constructor(
             )
         }
 
-        val actionUrl = message.extras?.action?.onClick?.intentUrl
+        val actionUrl = message.extras?.notification?.click?.url
+            ?: message.extras?.action?.onClick?.intentUrl
         if (!actionUrl.isNullOrBlank()) {
+            val targetIntent = try {
+                Intent.parseUri(actionUrl, Intent.URI_INTENT_SCHEME)
+            } catch (_: Exception) {
+                Intent(Intent.ACTION_VIEW, actionUrl.toUri())
+            }
             val actionIntent = PendingIntent.getActivity(
-                context, message.id.toInt(),
-                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(actionUrl)),
+                context, stableId(serverId, message.id),
+                targetIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            builder.addAction(0, "Open", actionIntent)
+            builder.addAction(R.drawable.ic_notification, "Open", actionIntent)
         }
 
         with(NotificationManagerCompat.from(context)) {
-            try { notify(message.id.toInt(), builder.build()) }
-            catch (_: SecurityException) { }
+            notify(stableId(serverId, message.id), builder.build())
         }
     }
 
     fun buildForegroundNotification(serverName: String, tapIntent: PendingIntent): android.app.Notification =
         NotificationCompat.Builder(context, CHANNEL_FOREGROUND)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("Gotify connected")
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(context.getString(R.string.service_running))
             .setContentText(serverName)
             .setContentIntent(tapIntent)
             .setOngoing(true)
@@ -155,13 +171,14 @@ class GotifyNotificationManager @Inject constructor(
             .setSilent(true)
             .build()
 
-    fun cancelNotification(messageId: Long) = manager.cancel(messageId.toInt())
+    fun cancelNotification(serverId: Long, messageId: Long) = manager.cancel(stableId(serverId, messageId))
     fun cancelAllNotifications()            = manager.cancelAll()
 
-    private fun lowChannelId(appId: Int)          = "${PREFIX}${appId}_low"
-    private fun normalChannelId(appId: Int)        = "${PREFIX}${appId}_normal"
-    private fun highVibrateChannelId(appId: Int)   = "${PREFIX}${appId}_high_v"
-    private fun highSilentChannelId(appId: Int)    = "${PREFIX}${appId}_high_s"
+    private fun lowChannelId(serverId: Long, appId: Int)        = "${PREFIX}${serverId}_${appId}_low"
+    private fun normalChannelId(serverId: Long, appId: Int)     = "${PREFIX}${serverId}_${appId}_normal"
+    private fun highVibrateChannelId(serverId: Long, appId: Int)= "${PREFIX}${serverId}_${appId}_high_v"
+    private fun highSilentChannelId(serverId: Long, appId: Int) = "${PREFIX}${serverId}_${appId}_high_s"
+    private fun stableId(serverId: Long, messageId: Long): Int = 31 * serverId.hashCode() + messageId.hashCode()
 
     private fun createChannel(
         id:         String,
@@ -170,8 +187,13 @@ class GotifyNotificationManager @Inject constructor(
         sound:      Boolean,
         vibrate:    Boolean
     ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        if (manager.getNotificationChannel(id) != null) return
+        manager.getNotificationChannel(id)?.let { existing ->
+            if (existing.name != name) {
+                existing.name = name
+                manager.createNotificationChannel(existing)
+            }
+            return
+        }
         val channel = NotificationChannel(id, name, importance).apply {
             enableLights(true)
             lightColor = Color.BLUE

@@ -18,10 +18,11 @@ fun MessageEntity.toDomain(): GotifyMessage = GotifyMessage(
     date     = date,
     extras   = extrasJson?.let {
         try { gson.fromJson(it, MessageExtras::class.java) } catch (e: Exception) { null }
-    }
+    },
+    isRead   = isRead
 )
 
-fun GotifyMessage.toEntity(serverId: Long): MessageEntity = MessageEntity(
+fun GotifyMessage.toEntity(serverId: Long, isRead: Boolean? = null): MessageEntity = MessageEntity(
     id         = id,
     serverId   = serverId,
     appId      = appId,
@@ -29,22 +30,27 @@ fun GotifyMessage.toEntity(serverId: Long): MessageEntity = MessageEntity(
     message    = message,
     priority   = priority,
     date       = date,
-    extrasJson = extras?.let { gson.toJson(it) }
+    extrasJson = extras?.let { gson.toJson(it) },
+    isRead     = isRead ?: this.isRead
 )
 
 fun ApplicationEntity.toDomain(): GotifyApplication = GotifyApplication(
     id          = id,
-    token       = token,
+    token       = CredentialCipher.decrypt(token),
     name        = name,
     description = description,
     internal    = internal,
     image       = image
 )
 
-fun GotifyApplication.toEntity(serverId: Long): ApplicationEntity = ApplicationEntity(
+fun GotifyApplication.toEntity(serverId: Long, cachedToken: String? = null): ApplicationEntity = ApplicationEntity(
     id          = id,
     serverId    = serverId,
-    token       = token,
+    // Preserve an encrypted cached token if the Android Keystore is temporarily
+    // unavailable; a sync must never silently erase the only local credential.
+    token       = CredentialCipher.encrypt(
+        token ?: CredentialCipher.decrypt(cachedToken) ?: cachedToken
+    ),
     name        = name,
     description = description,
     internal    = internal,
@@ -55,7 +61,7 @@ fun ServerEntity.toDomain(): GotifyServer = GotifyServer(
     id          = id,
     name        = name,
     baseUrl     = baseUrl,
-    clientToken = clientToken,
+    clientToken = CredentialCipher.decrypt(clientToken).orEmpty(),
     isActive    = isActive
 )
 
@@ -63,7 +69,7 @@ fun GotifyServer.toEntity(clientId: Int = 0): ServerEntity = ServerEntity(
     id          = id,
     name        = name,
     baseUrl     = baseUrl,
-    clientToken = clientToken,
+    clientToken = CredentialCipher.encrypt(clientToken).orEmpty(),
     clientId    = clientId,
     isActive    = isActive
 )

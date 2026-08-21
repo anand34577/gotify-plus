@@ -10,6 +10,7 @@ package com.gotify.client.data.repository
 import com.gotify.client.data.api.GotifyApiClient
 import com.gotify.client.data.api.GotifyWebSocketManager
 import com.gotify.client.data.api.NetworkClientFactory
+import com.gotify.client.BuildConfig
 import com.gotify.client.data.model.GotifyServer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,7 +45,7 @@ class ServerManager @Inject constructor(
 
         val newServer = server.copy(
             id       = resolvedId,
-            isActive = server.isActive || existing.isEmpty()
+            isActive = server.isActive
         )
 
 
@@ -72,7 +73,6 @@ class ServerManager @Inject constructor(
             _apiClient = null
             _activeServer.value = null
             webSocketManager.disconnect()
-            updated.firstOrNull()?.let { activateServer(it) }
         }
     }
 
@@ -93,7 +93,7 @@ class ServerManager @Inject constructor(
 
     private fun activateServer(server: GotifyServer) {
         _activeServer.value = server
-        _apiClient = NetworkClientFactory.create(server, isDebug = true)
+        _apiClient = NetworkClientFactory.create(server, isDebug = BuildConfig.DEBUG)
         webSocketManager.connect(server.baseUrl, server.clientToken)
     }
 }

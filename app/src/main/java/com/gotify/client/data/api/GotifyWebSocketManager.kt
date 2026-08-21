@@ -29,9 +29,6 @@ import javax.inject.Inject
 private const val TAG = "GotifyWebSocket"
 
 
-private const val MAX_RETRY_ATTEMPTS = 10
-
-
 private const val RETRY_BASE_DELAY_MS = 1_000L
 private const val RETRY_MAX_DELAY_MS  = 60_000L
 
@@ -45,6 +42,7 @@ class GotifyWebSocketManager @Inject constructor(
     private var webSocket: WebSocket? = null
     private var retryJob: Job? = null
     private var retryAttempt = 0
+    @Volatile private var manuallyDisconnected = true
 
 
     private val okHttpClient = OkHttpClient.Builder()
@@ -75,17 +73,19 @@ class GotifyWebSocketManager @Inject constructor(
 
     
     fun connect(baseUrl: String, token: String) {
+        if (baseUrl.isBlank() || token.isBlank()) return
+        disconnect(notifyListeners = false)
+        manuallyDisconnected = false
         currentBaseUrl = baseUrl.trimEnd('/')
         currentToken   = token
         retryAttempt   = 0
 
-        cancelRetry()
-        disconnect(notifyListeners = false)
         openSocket()
     }
 
     
     fun disconnect(notifyListeners: Boolean = true) {
+        manuallyDisconnected = true
         cancelRetry()
         webSocket?.close(1000, "User disconnected")
         webSocket = null
@@ -103,34 +103,31 @@ class GotifyWebSocketManager @Inject constructor(
 
 
     private fun openSocket() {
-        val streamUrl = buildStreamUrl(currentBaseUrl, currentToken)
-        Log.d(TAG, "Connecting to: $streamUrl")
+        val streamUrl = buildStreamUrl(currentBaseUrl)
+        Log.d(TAG, "Connecting to Gotify stream")
 
         emit(StreamState.Connecting)
 
         val request = Request.Builder()
             .url(streamUrl)
+            .header("X-Gotify-Key", currentToken)
             .build()
 
         webSocket = okHttpClient.newWebSocket(request, GotifyWebSocketListener())
     }
 
     
-    private fun buildStreamUrl(baseUrl: String, token: String): String {
+    private fun buildStreamUrl(baseUrl: String): String {
         val wsBase = baseUrl
             .replace("https://", "wss://")
             .replace("http://",  "ws://")
-        return "$wsBase/stream?token=$token"
+        return "$wsBase/stream"
     }
 
     private fun scheduleReconnect() {
-        if (retryAttempt >= MAX_RETRY_ATTEMPTS) {
-            Log.w(TAG, "Max reconnection attempts reached — giving up")
-            emit(StreamState.Error("Connection lost after $MAX_RETRY_ATTEMPTS attempts"))
-            return
-        }
+        if (manuallyDisconnected || currentBaseUrl.isBlank() || currentToken.isBlank()) return
 
-        val delay = (RETRY_BASE_DELAY_MS * (1L shl retryAttempt))
+        val delay = (RETRY_BASE_DELAY_MS * (1L shl retryAttempt.coerceAtMost(6)))
             .coerceAtMost(RETRY_MAX_DELAY_MS)
 
         Log.d(TAG, "Reconnecting in ${delay}ms (attempt ${retryAttempt + 1})")
@@ -151,7 +148,7 @@ class GotifyWebSocketManager @Inject constructor(
     }
 
     private fun emit(state: StreamState) {
-        _connectionState.value = state
+        if (state !is StreamState.Message) _connectionState.value = state
         scope.launch { _streamState.emit(state) }
     }
 
@@ -160,26 +157,32 @@ class GotifyWebSocketManager @Inject constructor(
     private inner class GotifyWebSocketListener : WebSocketListener() {
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (this@GotifyWebSocketManager.webSocket !== webSocket) {
+                webSocket.close(1000, "Superseded")
+                return
+            }
             Log.d(TAG, "WebSocket connected")
             retryAttempt = 0
             emit(StreamState.Connected)
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (this@GotifyWebSocketManager.webSocket !== webSocket) return
             try {
                 val message = gson.fromJson(text, GotifyMessage::class.java)
                 Log.d(TAG, "Message received: id=${message.id} appId=${message.appId}")
                 emit(StreamState.Message(message))
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to parse WebSocket message: $text", e)
+                Log.e(TAG, "Failed to parse WebSocket message", e)
             }
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (this@GotifyWebSocketManager.webSocket !== webSocket) return
             val reason = t.message ?: "Unknown error"
             Log.w(TAG, "WebSocket failure: $reason — scheduling reconnect")
             emit(StreamState.Error(reason))
-            scheduleReconnect()
+            if (!manuallyDisconnected) scheduleReconnect()
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -188,11 +191,12 @@ class GotifyWebSocketManager @Inject constructor(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (this@GotifyWebSocketManager.webSocket !== webSocket) return
             Log.d(TAG, "WebSocket closed: $code $reason")
             emit(StreamState.Closed(code, reason))
 
 
-            if (code != 1000) {
+            if (code != 1000 && !manuallyDisconnected) {
                 scheduleReconnect()
             }
         }

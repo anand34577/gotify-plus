@@ -40,7 +40,7 @@ data class HealthResponse(
 
 data class GotifyApplication(
     @SerializedName("id")          val id: Int,
-    @SerializedName("token")       val token: String,
+    @SerializedName("token")       val token: String? = null,
     @SerializedName("name")        val name: String,
     @SerializedName("description") val description: String,
     @SerializedName("internal")    val internal: Boolean,
@@ -61,7 +61,8 @@ data class GotifyMessage(
     @SerializedName("title")    val title: String,
     @SerializedName("priority") val priority: Int,
     @SerializedName("date")     val date: String,
-    @SerializedName("extras")   val extras: MessageExtras? = null
+    @SerializedName("extras")   val extras: MessageExtras? = null,
+    val isRead: Boolean = false
 )
 
 
@@ -76,7 +77,12 @@ data class ClientDisplay(
 )
 
 data class ClientNotification(
-    @SerializedName("bigImageUrl") val bigImageUrl: String?
+    @SerializedName("bigImageUrl") val bigImageUrl: String? = null,
+    @SerializedName("click")       val click: NotificationClick? = null
+)
+
+data class NotificationClick(
+    @SerializedName("url") val url: String? = null
 )
 
 data class AndroidAction(

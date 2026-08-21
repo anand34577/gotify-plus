@@ -11,26 +11,31 @@ import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
-import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage
-import coil.compose.SubcomposeAsyncImageContent
-import coil.compose.AsyncImagePainter
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.ui.components.*
+import java.net.URI
 
 
 
 
 
 fun resolveAppImageUrl(baseUrl: String, relativePath: String): String? {
-    return null;
-
-
+    if (baseUrl.isBlank() || relativePath.isBlank()) return null
+    val candidate = if (relativePath.startsWith("https://", ignoreCase = true) ||
+        relativePath.startsWith("http://", ignoreCase = true)
+    ) {
+        relativePath
+    } else {
+        "${baseUrl.trimEnd('/')}/${relativePath.trimStart('/')}"
+    }
+    val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
+    return candidate.takeIf {
+        uri.scheme.equals("http", ignoreCase = true) ||
+            uri.scheme.equals("https", ignoreCase = true)
+    }
 }
 
 
@@ -41,58 +46,19 @@ fun resolveAppImageUrl(baseUrl: String, relativePath: String): String? {
 fun AppIconResolved(
     resolvedImageUrl: String?,
     appName: String,
-    size: Dp = 40.dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    clientToken: String = "",
+    authBaseUrl: String = "",
+    size: Dp = 40.dp
 ) {
-    val shape = RoundedCornerShape(10.dp)
-
-
-    val hue     = (appName.hashCode().and(0x7FFFFFFF) % 360).toFloat()
-    val bg      = androidx.compose.ui.graphics.Color.hsl(hue, 0.6f, 0.35f)
-    val initial = appName.firstOrNull()?.uppercaseChar() ?: '?'
-
-    if (!resolvedImageUrl.isNullOrBlank()) {
-        SubcomposeAsyncImage(
-            model              = resolvedImageUrl,
-            contentDescription = appName,
-            contentScale       = ContentScale.Crop,
-            modifier           = modifier.size(size).clip(shape)
-        ) {
-            when (painter.state) {
-                is coil.compose.AsyncImagePainter.State.Success -> SubcomposeAsyncImageContent()
-
-                else -> Box(
-                    modifier         = Modifier
-                        .size(size)
-                        .clip(shape)
-                        .background(bg),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text       = initial.toString(),
-                        style      = MaterialTheme.typography.titleMedium,
-                        color      = androidx.compose.ui.graphics.Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-    } else {
-        Box(
-            modifier         = modifier
-                .size(size)
-                .clip(shape)
-                .background(bg),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text       = initial.toString(),
-                style      = MaterialTheme.typography.titleMedium,
-                color      = androidx.compose.ui.graphics.Color.White,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
+    AppIcon(
+        imageUrl = resolvedImageUrl,
+        appName = appName,
+        modifier = modifier,
+        clientToken = clientToken,
+        authBaseUrl = authBaseUrl,
+        size = size
+    )
 }
 
 
@@ -106,6 +72,7 @@ fun ApplicationsScreen(
     isLoading: Boolean,
     clientToken: String,
     isRefreshing: Boolean,
+    errorMessage: String?,
     onRefresh: () -> Unit,
     onAppClick: (GotifyApplication) -> Unit,
     onDeleteApp: (Int) -> Unit,
@@ -116,6 +83,9 @@ fun ApplicationsScreen(
     var showCreateSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val pullState = rememberPullToRefreshState()
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { snackbarHostState.showSnackbar(it) }
+    }
 
     Scaffold(
         modifier     = modifier,
@@ -200,6 +170,8 @@ fun ApplicationsScreen(
                         ApplicationCard(
                             application      = app,
                             resolvedImageUrl = resolvedImageUrl,
+                            clientToken      = clientToken,
+                            authBaseUrl      = serverBaseUrl,
                             messageCount     = messageCounts[app.id] ?: 0,
                             onClick          = { onAppClick(app) },
                             onDelete         = { onDeleteApp(app.id) },
@@ -226,6 +198,8 @@ fun ApplicationsScreen(
 private fun ApplicationCard(
     application:      GotifyApplication,
     resolvedImageUrl: String?,
+    clientToken: String,
+    authBaseUrl: String,
     messageCount:     Int,
     onClick:          () -> Unit,
     onDelete:         () -> Unit,
@@ -252,6 +226,8 @@ private fun ApplicationCard(
             AppIconResolved(
                 resolvedImageUrl = resolvedImageUrl,
                 appName          = application.name,
+                clientToken      = clientToken,
+                authBaseUrl      = authBaseUrl,
                 size             = 48.dp
             )
 
@@ -302,7 +278,7 @@ private fun ApplicationCard(
                 ) {
                     Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                         Text(
-                            "Token: ${application.token.take(8)}…",
+                            application.token?.let { "Token: ${it.take(8)}…" } ?: "Token hidden by server",
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             style    = MaterialTheme.typography.labelSmall,
                             color    = MaterialTheme.colorScheme.onSurfaceVariant
@@ -322,7 +298,7 @@ private fun ApplicationCard(
             }
 
             Box {
-                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { showMenu = true }) {
                     Icon(Icons.Outlined.MoreVert, null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                 }
@@ -337,12 +313,14 @@ private fun ApplicationCard(
                         leadingIcon = { Icon(Icons.Outlined.ClearAll, null) },
                         onClick     = { onClearMessages(); showMenu = false }
                     )
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text        = { Text("Delete application", color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
-                        onClick     = { showConfirm = true; showMenu = false }
-                    )
+                    if (!application.internal) {
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text        = { Text("Delete application", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                            onClick     = { showConfirm = true; showMenu = false }
+                        )
+                    }
                 }
             }
         }

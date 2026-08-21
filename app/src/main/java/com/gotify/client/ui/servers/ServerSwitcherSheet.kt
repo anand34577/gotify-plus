@@ -21,8 +21,13 @@ import com.gotify.client.ui.components.ConnectionStatus
 fun ServerSwitcherSheet(
     servers: List<GotifyServer>,
     connectionStatus: ConnectionStatus,
+    onSwitchServer: (Long) -> Unit,
+    onRemoveServer: (Long) -> Unit,
+    onAddServer: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var serverToRemove by remember { mutableStateOf<GotifyServer?>(null) }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -41,7 +46,9 @@ fun ServerSwitcherSheet(
             servers.forEach { server ->
                 ServerRow(
                     server = server,
-                    connectionStatus = connectionStatus
+                    connectionStatus = connectionStatus,
+                    onClick = { if (!server.isActive) { onSwitchServer(server.id); onDismiss() } },
+                    onRemove = { serverToRemove = server }
                 )
             }
 
@@ -57,7 +64,39 @@ fun ServerSwitcherSheet(
                     )
                 }
             }
+
+            FilledTonalButton(
+                onClick = { onDismiss(); onAddServer() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Outlined.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Add server")
+            }
         }
+    }
+
+    serverToRemove?.let { server ->
+        AlertDialog(
+            onDismissRequest = { serverToRemove = null },
+            icon = { Icon(Icons.Outlined.Warning, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Remove ${server.name}?") },
+            text = {
+                Text("This removes the saved server and its locally cached messages from this device.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRemoveServer(server.id)
+                        serverToRemove = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { serverToRemove = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -65,13 +104,16 @@ fun ServerSwitcherSheet(
 private fun ServerRow(
     server: GotifyServer,
     connectionStatus: ConnectionStatus,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
+        onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+        shape = MaterialTheme.shapes.medium,
+        color = if (server.isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+        border = if (server.isActive) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -79,7 +121,7 @@ private fun ServerRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Surface(
-                shape = RoundedCornerShape(10.dp),
+                shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.surface
             ) {
                 Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
@@ -103,7 +145,7 @@ private fun ServerRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    ConnectionDot(status = connectionStatus)
+                    if (server.isActive) ConnectionDot(status = connectionStatus)
                 }
                 Text(
                     text = server.baseUrl,
@@ -114,11 +156,14 @@ private fun ServerRow(
                 )
             }
 
-            Icon(
-                Icons.Outlined.CheckCircle, null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
+            if (server.isActive) {
+                Icon(Icons.Outlined.CheckCircle, "Active server", tint = MaterialTheme.colorScheme.primary)
+            } else {
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Outlined.Delete, "Remove server")
+                }
+            }
+
         }
     }
 }

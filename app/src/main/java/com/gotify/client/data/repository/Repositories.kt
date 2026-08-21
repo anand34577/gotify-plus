@@ -56,9 +56,14 @@ class MessageRepository @Inject constructor(
     private val api: GotifyApiClient
 ) {
 
+    data class MessageSyncResult(
+        val messages: List<GotifyMessage>,
+        val complete: Boolean
+    )
+
     
     suspend fun getMessages(
-        limit: Int = 100,
+        limit: Int = 200,
         since: Long? = null
     ): ApiResult<PagedMessages> =
         safeApiCall { api.messages.getMessages(limit, since) }
@@ -66,23 +71,83 @@ class MessageRepository @Inject constructor(
     
     suspend fun getMessagesByApp(
         appId: Int,
-        limit: Int = 100,
+        limit: Int = 200,
         since: Long? = null
     ): ApiResult<PagedMessages> =
         safeApiCall { api.messages.getMessagesByApp(appId, limit, since) }
 
+    suspend fun getAllMessages(
+        pageSize: Int = 200,
+        maxPages: Int = 50
+    ): ApiResult<MessageSyncResult> {
+        val messages = mutableListOf<GotifyMessage>()
+        var since: Long? = null
+
+        repeat(maxPages) {
+            when (val result = getMessages(pageSize, since)) {
+                is ApiResult.Success -> {
+                    val page = result.data
+                    messages += page.messages
+                    val nextSince = page.paging.since
+                    val hasMore = page.paging.next != null &&
+                        nextSince != null &&
+                        nextSince != since &&
+                        page.messages.isNotEmpty()
+                    if (!hasMore) return ApiResult.Success(MessageSyncResult(messages, complete = true))
+                    since = nextSince
+                }
+                is ApiResult.Error -> return result
+                ApiResult.Loading -> Unit
+            }
+        }
+
+        return ApiResult.Success(MessageSyncResult(messages, complete = false))
+    }
+
+    suspend fun getAllMessagesByApp(
+        appId: Int,
+        pageSize: Int = 200,
+        maxPages: Int = 50
+    ): ApiResult<MessageSyncResult> {
+        val messages = mutableListOf<GotifyMessage>()
+        var since: Long? = null
+
+        repeat(maxPages) {
+            when (val result = getMessagesByApp(appId, pageSize, since)) {
+                is ApiResult.Success -> {
+                    val page = result.data
+                    messages += page.messages
+                    val nextSince = page.paging.since
+                    val hasMore = page.paging.next != null &&
+                        nextSince != null &&
+                        nextSince != since &&
+                        page.messages.isNotEmpty()
+                    if (!hasMore) return ApiResult.Success(MessageSyncResult(messages, complete = true))
+                    since = nextSince
+                }
+                is ApiResult.Error -> return result
+                ApiResult.Loading -> Unit
+            }
+        }
+
+        return ApiResult.Success(MessageSyncResult(messages, complete = false))
+    }
+
     
-    fun getAllMessagesFlow(pageSize: Int = 100): Flow<ApiResult<List<GotifyMessage>>> = flow {
+    fun getAllMessagesFlow(pageSize: Int = 200, maxPages: Int = 50): Flow<ApiResult<List<GotifyMessage>>> = flow {
         var since: Long? = null
         var hasMore = true
+        var pages = 0
 
-        while (hasMore) {
+        while (hasMore && pages < maxPages) {
             val result = getMessages(pageSize, since)
             when (result) {
                 is ApiResult.Success -> {
                     emit(ApiResult.Success(result.data.messages))
-                    since = result.data.paging.since
-                    hasMore = result.data.paging.next != null
+                    val nextSince = result.data.paging.since
+                    hasMore = result.data.paging.next != null && nextSince != null && nextSince != since && result.data.messages.isNotEmpty()
+                    since = nextSince
+                    pages++
                 }
                 is ApiResult.Error -> {
                     emit(result)
@@ -94,17 +159,20 @@ class MessageRepository @Inject constructor(
     }
 
     
-    fun getAppMessagesFlow(appId: Int, pageSize: Int = 100): Flow<ApiResult<List<GotifyMessage>>> = flow {
+    fun getAppMessagesFlow(appId: Int, pageSize: Int = 200, maxPages: Int = 50): Flow<ApiResult<List<GotifyMessage>>> = flow {
         var since: Long? = null
         var hasMore = true
+        var pages = 0
 
-        while (hasMore) {
+        while (hasMore && pages < maxPages) {
             val result = getMessagesByApp(appId, pageSize, since)
             when (result) {
                 is ApiResult.Success -> {
                     emit(ApiResult.Success(result.data.messages))
-                    since = result.data.paging.since
-                    hasMore = result.data.paging.next != null
+                    val nextSince = result.data.paging.since
+                    hasMore = result.data.paging.next != null && nextSince != null && nextSince != since && result.data.messages.isNotEmpty()
+                    since = nextSince
+                    pages++
                 }
                 is ApiResult.Error -> {
                     emit(result)

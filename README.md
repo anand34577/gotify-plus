@@ -24,7 +24,7 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 - **Real-time notifications** via persistent WebSocket connection to `/stream`
 - **Per-app notification channels** with Low / Normal / High priority tiers
 - **Offline caching** — messages stored in Room DB, readable without network
-- **Full-text search** across all cached messages
+- **Cached message search** with result highlighting
 - **App inbox** — per-application message view
 - **Markdown rendering** in message bodies
 - **Action buttons** — tap extras from message payloads open URLs directly
@@ -32,7 +32,7 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 - **Vibration control** — toggle independently from notification sound
 - **Filter chips** — filter the message feed by application instantly
 - **Pull-to-refresh** on both messages and applications screens
-- **Battery optimization** — foreground service survives Doze with wake lock
+- **Battery optimization guidance** — opens Android's battery settings so the user can review background restrictions
 - **Boot receiver** — listener service auto-restarts after device reboot
 
 ---
@@ -111,7 +111,7 @@ app/
     ├── home/         Main message feed with filter chips
     ├── login/        Server URL + auth screen
     ├── navigation/   NavHost, bottom bar, route constants
-    ├── search/       Full-text search with result highlighting
+    ├── search/       Cached search with result highlighting
     ├── servers/      Server info sheet
     ├── settings/     Settings screen
     ├── theme/        Material 3 color schemes, priority colours
@@ -137,7 +137,7 @@ app/
 | ---------------------------------- | ------------------------------------ |
 | `POST /client`                     | Create client token on login         |
 | `DELETE /client/{id}`              | Revoke token on logout               |
-| `GET /user/current`                | Validate manual token                |
+| `GET /current/user`                | Validate elevated user sessions      |
 | `GET /message`                     | Fetch + paginate all messages        |
 | `DELETE /message/{id}`             | Delete single message                |
 | `DELETE /message`                  | Delete all messages                  |
@@ -158,9 +158,7 @@ app/
 | `FOREGROUND_SERVICE`                   | Keep WebSocket alive in background    |
 | `POST_NOTIFICATIONS`                   | Show push notifications (Android 13+) |
 | `RECEIVE_BOOT_COMPLETED`               | Restart listener after reboot         |
-| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Reliable background delivery          |
 | `VIBRATE`                              | High-priority notification vibration  |
-| `WAKE_LOCK`                            | Keep connection alive during Doze     |
 
 ---
 

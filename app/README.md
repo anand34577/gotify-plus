@@ -132,7 +132,7 @@ app/
 |---|---|
 | `POST /client` | Create client token on login |
 | `DELETE /client/{id}` | Revoke token on logout |
-| `GET /user/current` | Validate manual token |
+| `GET /current/user` | Validate elevated user sessions |
 | `GET /message` | Fetch + paginate all messages |
 | `DELETE /message/{id}` | Delete single message |
 | `DELETE /message` | Delete all messages |
@@ -153,9 +153,7 @@ app/
 | `FOREGROUND_SERVICE` | Keep WebSocket alive in background |
 | `POST_NOTIFICATIONS` | Show push notifications (Android 13+) |
 | `RECEIVE_BOOT_COMPLETED` | Restart listener after reboot |
-| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Reliable background delivery |
 | `VIBRATE` | High-priority notification vibration |
-| `WAKE_LOCK` | Keep connection alive during Doze |
 
 ---
 

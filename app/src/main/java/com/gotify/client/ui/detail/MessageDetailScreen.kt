@@ -6,18 +6,26 @@ import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
+import com.gotify.client.ui.apps.resolveAppImageUrl
 import com.gotify.client.ui.components.*
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,15 +35,29 @@ fun MessageDetailScreen(
     onBack: () -> Unit,
     onDelete: () -> Unit,
     onOpenAppInbox: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    markdownEnabled: Boolean = true,
+    clientToken: String = "",
+    serverBaseUrl: String = "",
+    errorMessage: String? = null
 ) {
     val uriHandler = LocalUriHandler.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    val applicationImageUrl = application?.image?.let { image ->
+        resolveAppImageUrl(serverBaseUrl, image)
+    }
+
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { snackbarHostState.showSnackbar(it) }
+    }
 
 
-    val isMarkdown = message.extras?.display?.contentType == "text/markdown"
+    val isMarkdown = markdownEnabled && message.extras?.display?.contentType == "text/markdown"
 
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar   = {
             TopAppBar(
                 title          = { Text("Message") },
@@ -85,8 +107,10 @@ fun MessageDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     AppIcon(
-                        imageUrl = application?.image,
+                        imageUrl = applicationImageUrl,
                         appName  = application?.name ?: "App",
+                        clientToken = clientToken,
+                        authBaseUrl = serverBaseUrl,
                         size     = 48.dp
                     )
                     Column(modifier = Modifier.weight(1f)) {
@@ -98,7 +122,7 @@ fun MessageDetailScreen(
                         )
                         if (!application?.description.isNullOrBlank()) {
                             Text(
-                                text  = application!!.description,
+                                text  = application.description,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1
@@ -153,19 +177,33 @@ fun MessageDetailScreen(
 
             val bigImageUrl = message.extras?.notification?.bigImageUrl
             if (!bigImageUrl.isNullOrBlank()) {
-                MessageImageCard(imageUrl = bigImageUrl)
+                MessageImageCard(
+                    imageUrl = resolveAppImageUrl(serverBaseUrl, bigImageUrl) ?: bigImageUrl,
+                    clientToken = clientToken,
+                    authBaseUrl = serverBaseUrl
+                )
             }
 
 
-            val actionUrl = message.extras?.action?.onClick?.intentUrl
+            val actionUrl = message.extras?.notification?.click?.url
+                ?: message.extras?.action?.onClick?.intentUrl
                 ?: message.extras?.action?.onReceive?.intentUrl
             if (!actionUrl.isNullOrBlank()) {
                 Button(
-                    onClick  = { uriHandler.openUri(actionUrl) },
+                    onClick  = {
+                        runCatching { uriHandler.openUri(actionUrl) }
+                            .onFailure { error ->
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        error.message ?: "Unable to open this action"
+                                    )
+                                }
+                            }
+                    },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape    = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Outlined.OpenInNew, null, Modifier.size(18.dp))
+                    Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Open Action", fontWeight = FontWeight.SemiBold)
                 }
@@ -182,9 +220,26 @@ fun MessageDetailScreen(
 
 
 @Composable
-private fun MessageImageCard(imageUrl: String) {
+private fun MessageImageCard(
+    imageUrl: String,
+    clientToken: String,
+    authBaseUrl: String
+) {
+    val context = LocalContext.current
+    val request = remember(imageUrl, clientToken, authBaseUrl) {
+        ImageRequest.Builder(context)
+            .data(imageUrl)
+            .apply {
+                if (shouldAttachGotifyKey(imageUrl, clientToken, authBaseUrl)) {
+                    addHeader("X-Gotify-Key", clientToken)
+                }
+            }
+            .crossfade(true)
+            .build()
+    }
+
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
@@ -206,12 +261,30 @@ private fun MessageImageCard(imageUrl: String) {
             }
             Spacer(Modifier.height(10.dp))
 
-
-
-            Text(
-                text  = imageUrl,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.primary
+            SubcomposeAsyncImage(
+                model = request,
+                contentDescription = "Message attachment",
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .clip(MaterialTheme.shapes.medium),
+                loading = {
+                    Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                },
+                error = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.BrokenImage, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Unable to load attachment")
+                    }
+                }
             )
         }
     }
