@@ -34,7 +34,7 @@ interface MessageApi {
     
     @GET("message")
     suspend fun getMessages(
-        @Query("limit") limit: Int = 100,
+        @Query("limit") limit: Int = 200,
         @Query("since") since: Long? = null
     ): Response<PagedMessages>
 
@@ -42,7 +42,7 @@ interface MessageApi {
     @GET("application/{appId}/message")
     suspend fun getMessagesByApp(
         @Path("appId")  appId: Int,
-        @Query("limit") limit: Int = 100,
+        @Query("limit") limit: Int = 200,
         @Query("since") since: Long? = null
     ): Response<PagedMessages>
 
@@ -108,7 +108,7 @@ interface UserApi {
     suspend fun getUsers(): Response<List<GotifyUser>>
 
     
-    @GET("user/current")
+    @GET("current/user")
     suspend fun getCurrentUser(): Response<GotifyUser>
 
     

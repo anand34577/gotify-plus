@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +23,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -31,6 +35,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,14 +49,23 @@ import com.gotify.client.ui.components.EmptyState
 import com.gotify.client.ui.components.MessageCard
 import com.gotify.client.ui.components.MessageCardSkeleton
 import com.gotify.client.ui.components.SectionHeader
+import com.gotify.client.ui.apps.AppIconResolved
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppInboxScreen(
     appName: String,
     appImageUrl: String?,
+    clientToken: String,
+    serverBaseUrl: String,
     messages: List<GotifyMessage>,
     isLoading: Boolean,
+    isRefreshing: Boolean,
+    hasMorePages: Boolean,
+    cacheSyncTruncated: Boolean,
+    errorMessage: String?,
+    onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
     onBack: () -> Unit,
     onMessageClick: (GotifyMessage) -> Unit,
     onDeleteMessage: (Long) -> Unit,
@@ -60,9 +74,15 @@ fun AppInboxScreen(
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
     val pullState = rememberPullToRefreshState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { snackbarHostState.showSnackbar(it) }
+    }
 
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -70,7 +90,13 @@ fun AppInboxScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-
+                        AppIconResolved(
+                            resolvedImageUrl = appImageUrl,
+                            appName = appName,
+                            clientToken = clientToken,
+                            authBaseUrl = serverBaseUrl,
+                            size = 32.dp
+                        )
                         Text(appName, fontWeight = FontWeight.Bold)
                     }
                 },
@@ -99,8 +125,8 @@ fun AppInboxScreen(
     ) { padding ->
 
         PullToRefreshBox(
-            isRefreshing = false,
-            onRefresh = {},
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
             state = pullState,
             modifier = Modifier
                 .fillMaxSize()
@@ -138,11 +164,33 @@ fun AppInboxScreen(
                             message = message.message,
                             appName = appName,
                             appImageUrl = appImageUrl,
+                            clientToken = clientToken,
+                            authBaseUrl = serverBaseUrl,
                             priority = message.priority,
                             date = message.date,
+                            isRead = message.isRead,
                             onClick = { onMessageClick(message) },
                             onDelete = { onDeleteMessage(message.id) }
                         )
+                    }
+                    if (cacheSyncTruncated) {
+                        item {
+                            Text(
+                                "Sync reached the history safety limit; older messages may not be cached.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                        }
+                    }
+                    if (hasMorePages && !isLoading) {
+                        item {
+                            OutlinedButton(
+                                onClick = onLoadMore,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                shape = MaterialTheme.shapes.medium
+                            ) { Text("Load more messages") }
+                        }
                     }
                     item { Spacer(Modifier.height(80.dp)) }
                 }

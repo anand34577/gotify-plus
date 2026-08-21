@@ -31,6 +31,8 @@ fun SearchScreen(
     query: String,
     results: List<GotifyMessage>,
     applications: Map<Int, GotifyApplication>,
+    clientToken: String,
+    serverBaseUrl: String,
     onQueryChange: (String) -> Unit,
     onClearQuery: () -> Unit,
     onBack: () -> Unit,
@@ -135,6 +137,8 @@ fun SearchScreen(
                                 appName     = app?.name ?: "App ${message.appId}",
                                 appImageUrl = app?.image,
                                 query       = query,
+                                clientToken = clientToken,
+                                authBaseUrl = serverBaseUrl,
                                 onClick     = { onMessageClick(message) }
                             )
                         }
@@ -155,6 +159,8 @@ private fun SearchResultCard(
     appName: String,
     appImageUrl: String?,
     query: String,
+    clientToken: String,
+    authBaseUrl: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -170,7 +176,13 @@ private fun SearchResultCard(
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                AppIcon(imageUrl = appImageUrl, appName = appName, size = 28.dp)
+                AppIcon(
+                    imageUrl = appImageUrl,
+                    appName = appName,
+                    clientToken = clientToken,
+                    authBaseUrl = authBaseUrl,
+                    size = 28.dp
+                )
                 Text(
                     text       = appName,
                     style      = MaterialTheme.typography.labelMedium,

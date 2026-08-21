@@ -90,7 +90,9 @@ object NetworkClientFactory {
 
         if (isDebug) {
             val logging = HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                redactHeader("Authorization")
+                redactHeader("X-Gotify-Key")
+                level = HttpLoggingInterceptor.Level.BASIC
             }
             builder.addInterceptor(logging)
         }

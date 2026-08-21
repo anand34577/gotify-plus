@@ -3,12 +3,15 @@ package com.gotify.client.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
 
@@ -90,7 +93,21 @@ private val LightColorScheme = lightColorScheme(
 
 
 
-val GotifyTypography = Typography()
+val GotifyTypography = Typography(
+    headlineSmall = Typography().headlineSmall.copy(letterSpacing = (-0.25).sp),
+    titleLarge = Typography().titleLarge.copy(letterSpacing = (-0.15).sp),
+    titleMedium = Typography().titleMedium.copy(letterSpacing = 0.sp),
+    bodyLarge = Typography().bodyLarge.copy(lineHeight = 25.sp),
+    bodyMedium = Typography().bodyMedium.copy(lineHeight = 21.sp)
+)
+
+val GotifyShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(32.dp)
+)
 
 
 
@@ -115,7 +132,6 @@ fun GotifyTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = Color.Transparent.toArgb()
             WindowCompat.getInsetsController(window, view)
                 .isAppearanceLightStatusBars = !darkTheme
         }
@@ -124,6 +140,7 @@ fun GotifyTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography  = GotifyTypography,
+        shapes      = GotifyShapes,
         content     = content
     )
 }

@@ -6,16 +6,17 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.room)
 }
 
 android {
     namespace   = "com.gotify.client"
-    compileSdk  = 36
+    compileSdk  = 37
 
     defaultConfig {
         applicationId = "com.gotify.client"
         minSdk        = 26
-        targetSdk     = 35
+        targetSdk     = 37
         versionCode   = 1
         versionName   = "1.0.0"
     }
@@ -28,10 +29,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-           /* proguardFiles(
+            proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
-            )*/
+            )
             buildConfigField("Boolean", "IS_DEBUG", "false")
         }
     }
@@ -46,6 +47,10 @@ android {
     buildFeatures {
         compose     = true
         buildConfig = true
+    }
+
+    room {
+        schemaDirectory("$projectDir/schemas")
     }
 }
 
@@ -102,4 +107,5 @@ dependencies {
 
     implementation(libs.core.ktx)
     implementation(libs.appcompat)
+    testImplementation(libs.junit)
 }

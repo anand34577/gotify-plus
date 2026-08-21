@@ -3,6 +3,7 @@ package com.gotify.client.util
 import android.util.Log
 import com.gotify.client.data.model.ApiResult
 import retrofit2.Response
+import kotlinx.coroutines.CancellationException
 
 private const val TAG = "ApiCall"
 
@@ -19,9 +20,11 @@ suspend fun <T> safeApiCall(call: suspend () -> Response<T>): ApiResult<T> {
             }
         } else {
             val errorBody = response.errorBody()?.string() ?: "Unknown error"
-            Log.w(TAG, "API error ${response.code()}: $errorBody")
+            Log.w(TAG, "API error ${response.code()}")
             ApiResult.Error(response.code(), parseErrorMessage(errorBody))
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         Log.e(TAG, "Network exception: ${e.message}", e)
         ApiResult.Error(null, e.message ?: "Network error")
@@ -38,6 +41,8 @@ suspend fun safeApiCallUnit(call: suspend () -> Response<Unit>): ApiResult<Unit>
             val errorBody = response.errorBody()?.string() ?: "Unknown error"
             ApiResult.Error(response.code(), parseErrorMessage(errorBody))
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         Log.e(TAG, "Network exception: ${e.message}", e)
         ApiResult.Error(null, e.message ?: "Network error")

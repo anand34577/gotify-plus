@@ -3,5 +3,6 @@
     <string name="app_name">Gotify+</string>
     <string name="notification_channel_foreground">Background connection</string>
     <string name="notification_channel_default">Gotify notifications</string>
+    <string name="notification_channel_high">Gotify high priority</string>
     <string name="service_running">Gotify is connected</string>
 </resources>

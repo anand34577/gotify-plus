@@ -9,14 +9,17 @@ import android.util.Log
 import com.gotify.client.data.api.GotifyWebSocketManager
 import com.gotify.client.data.db.MessageDao
 import com.gotify.client.data.db.ApplicationDao
+import com.gotify.client.data.db.ServerDao
 import com.gotify.client.data.db.toEntity
 import com.gotify.client.data.db.toDomain
+import com.gotify.client.data.datastore.PreferencesRepository
 import com.gotify.client.data.model.StreamState
 import com.gotify.client.data.repository.ServerManager
 import com.gotify.client.notification.GotifyNotificationManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
+import kotlinx.coroutines.flow.first
 
 private const val TAG = "GotifyService"
 
@@ -29,8 +32,13 @@ class GotifyListenerService : Service() {
     @Inject lateinit var messageDao:            MessageDao
     @Inject lateinit var applicationDao:        ApplicationDao
     @Inject lateinit var notificationManager:   GotifyNotificationManager
+    @Inject lateinit var serverDao:              ServerDao
+    @Inject lateinit var prefs:                  PreferencesRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var streamJob: Job? = null
+    private var serverJob: Job? = null
+    private var startupJob: Job? = null
 
 
 
@@ -45,6 +53,7 @@ class GotifyListenerService : Service() {
 
         when (intent?.action) {
             ACTION_STOP -> {
+                webSocketManager.disconnect()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -52,8 +61,9 @@ class GotifyListenerService : Service() {
         }
 
         startAsForeground()
-        observeWebSocket()
-        observeActiveServer()
+        if (startupJob?.isActive != true) {
+            startupJob = scope.launch { initializeAndObserve() }
+        }
 
         return START_STICKY
     }
@@ -62,6 +72,7 @@ class GotifyListenerService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")
+        webSocketManager.disconnect()
         scope.cancel()
         super.onDestroy()
     }
@@ -75,10 +86,30 @@ class GotifyListenerService : Service() {
         startForeground(GotifyNotificationManager.NOTIFICATION_ID_FOREGROUND, notification)
     }
 
+    private suspend fun initializeAndObserve() {
+        val preferences = prefs.userPreferences.first()
+        if (!preferences.keepAliveEnabled) {
+            stopSelf()
+            return
+        }
+        if (serverManager.activeServer.value == null) {
+            val entity = serverDao.getServerById(preferences.activeServerId)
+                ?: serverDao.getActiveServer()
+            if (entity == null) {
+                stopSelf()
+                return
+            }
+            serverManager.addServer(entity.toDomain())
+        }
+        observeWebSocket()
+        observeActiveServer()
+    }
+
 
 
     private fun observeWebSocket() {
-        scope.launch {
+        if (streamJob?.isActive == true) return
+        streamJob = scope.launch {
             webSocketManager.streamState.collect { state ->
                 when (state) {
                     is StreamState.Message -> handleNewMessage(state.message)
@@ -91,11 +122,14 @@ class GotifyListenerService : Service() {
     }
 
     private fun observeActiveServer() {
-        scope.launch {
+        if (serverJob?.isActive == true) return
+        serverJob = scope.launch {
             serverManager.activeServer.collect { server ->
                 if (server != null) {
                     Log.d(TAG, "Active server changed to: ${server.name}")
-
+                    startAsForeground()
+                } else {
+                    stopSelf()
                 }
             }
         }
@@ -108,19 +142,27 @@ class GotifyListenerService : Service() {
         Log.d(TAG, "New message: id=${message.id} appId=${message.appId} priority=${message.priority}")
 
 
-        messageDao.insertMessage(message.toEntity(serverId))
+        val existing = messageDao.getMessageById(serverId, message.id)
+        messageDao.insertMessage(message.toEntity(serverId, existing?.isRead ?: false))
+
+        message.extras?.action?.onReceive?.intentUrl?.takeIf { it.isNotBlank() }?.let { intentUrl ->
+            runCatching { Intent.parseUri(intentUrl, Intent.URI_INTENT_SCHEME) }
+                .onSuccess { sendBroadcast(it) }
+                .onFailure { Log.w(TAG, "Ignoring invalid onReceive intent") }
+        }
 
 
-        val app = applicationDao.getApplicationById(message.appId)?.toDomain()
+        val app = applicationDao.getApplicationById(serverId, message.appId)?.toDomain()
 
 
-        if (app != null) notificationManager.createAppChannels(app)
+        if (app != null) notificationManager.createAppChannels(serverId, app)
 
 
         notificationManager.postMessageNotification(
             message    = message,
             app        = app,
-            tapIntent  = buildDetailTapIntent(message.id)
+            tapIntent  = buildDetailTapIntent(serverId, message.id),
+            serverId   = serverId
         )
     }
 
@@ -137,20 +179,24 @@ class GotifyListenerService : Service() {
         )
     }
 
-    private fun buildDetailTapIntent(messageId: Long): PendingIntent {
+    private fun buildDetailTapIntent(serverId: Long, messageId: Long): PendingIntent {
 
         val intent = packageManager
             .getLaunchIntentForPackage(packageName)
             ?.apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("message_id", messageId)
+                putExtra("server_id", serverId)
             }
             ?: Intent()
         return PendingIntent.getActivity(
-            this, messageId.toInt(), intent,
+            this, stableRequestCode(serverId, messageId), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
+
+    private fun stableRequestCode(serverId: Long, messageId: Long): Int =
+        31 * serverId.hashCode() + messageId.hashCode()
 
 
 

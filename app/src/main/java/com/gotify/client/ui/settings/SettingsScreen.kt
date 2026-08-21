@@ -1,10 +1,10 @@
 package com.gotify.client.ui.settings
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.*
@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +21,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
+import androidx.core.net.toUri
 
 data class SettingsState(
     val notificationsEnabled: Boolean = true,
@@ -98,23 +100,18 @@ fun SettingsScreen(
                     title    = "Notification channels",
                     subtitle = "Configure per-app notification behavior",
                     onClick  = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startActivity(
-                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                            )
-                        }
+                        context.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        )
                     }
                 )
                 ClickableSettingsRow(
                     icon     = Icons.Outlined.BatteryAlert,
                     title    = "Battery optimization",
-                    subtitle = "Disable to ensure reliable delivery",
+                    subtitle = "Review system battery settings for reliable delivery",
                     onClick  = {
-                        context.startActivity(
-                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                                .apply { data = Uri.parse("package:${context.packageName}") }
-                        )
+                        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                     }
                 )
             }
@@ -170,7 +167,7 @@ fun SettingsScreen(
 
             SettingsSection(title = "Account") {
                 ClickableSettingsRow(
-                    icon      = Icons.Outlined.Logout,
+                    icon      = Icons.AutoMirrored.Outlined.Logout,
                     title     = "Sign out",
                     subtitle  = "Remove server and sign out",
                     onClick   = { showLogoutDialog = true },
@@ -191,7 +188,7 @@ fun SettingsScreen(
                     onClick  = {
                         context.startActivity(
                             Intent(Intent.ACTION_VIEW,
-                                Uri.parse("https://github.com/anand34577/gotify-plus"))
+                                "https://github.com/anand34577/gotify-plus".toUri())
                         )
                     }
                 )
@@ -204,9 +201,9 @@ fun SettingsScreen(
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            icon    = { Icon(Icons.Outlined.Logout, null, tint = MaterialTheme.colorScheme.error) },
+            icon    = { Icon(Icons.AutoMirrored.Outlined.Logout, null, tint = MaterialTheme.colorScheme.error) },
             title   = { Text("Sign out?") },
-            text    = { Text("This will remove \"${state.serverName}\" and revoke your client token.") },
+            text    = { Text("This removes \"${state.serverName}\" from this device and attempts to revoke its client token. Gotify 3 may require you to revoke it from the server web UI because deletion requires an elevated session.") },
             confirmButton = {
                 Button(
                     onClick = { onLogout(); showLogoutDialog = false },
@@ -232,7 +229,7 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
             modifier      = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
         )
         Surface(
-            shape    = RoundedCornerShape(16.dp),
+            shape    = MaterialTheme.shapes.large,
             color    = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -251,7 +248,10 @@ private fun SwitchSettingsRow(
     enabled:   Boolean = true
 ) {
     Row(
-        modifier              = Modifier.fillMaxWidth().padding(16.dp),
+        modifier              = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onChecked(!checked) }
+            .padding(16.dp),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {

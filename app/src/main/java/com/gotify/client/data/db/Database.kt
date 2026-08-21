@@ -18,6 +18,7 @@ data class ServerEntity(
 
 @Entity(
     tableName = "messages",
+    primaryKeys = ["serverId", "id"],
     indices = [
         Index("serverId"),
         Index("appId"),
@@ -26,7 +27,7 @@ data class ServerEntity(
     ]
 )
 data class MessageEntity(
-    @PrimaryKey val id: Long,
+    val id: Long,
     val serverId: Long,
     val appId: Int,
     val title: String,
@@ -38,11 +39,15 @@ data class MessageEntity(
     val cachedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "applications")
+@Entity(
+    tableName = "applications",
+    primaryKeys = ["serverId", "id"],
+    indices = [Index("serverId")]
+)
 data class ApplicationEntity(
-    @PrimaryKey val id: Int,
+    val id: Int,
     val serverId: Long,
-    val token: String,
+    val token: String? = null,
     val name: String,
     val description: String,
     val internal: Boolean,
@@ -63,6 +68,9 @@ interface ServerDao {
 
     @Query("SELECT * FROM servers WHERE id = :id LIMIT 1")
     suspend fun getServerById(id: Long): ServerEntity?
+
+    @Query("SELECT * FROM servers WHERE baseUrl = :baseUrl COLLATE NOCASE LIMIT 1")
+    suspend fun getServerByBaseUrl(baseUrl: String): ServerEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertServer(server: ServerEntity): Long
@@ -97,7 +105,7 @@ interface MessageDao {
     @Query("""
         SELECT * FROM messages 
         WHERE serverId = :serverId 
-        ORDER BY date DESC
+        ORDER BY id DESC
         LIMIT :limit OFFSET :offset
     """)
     fun getMessagesPaged(serverId: Long, limit: Int = 50, offset: Int = 0): Flow<List<MessageEntity>>
@@ -105,19 +113,19 @@ interface MessageDao {
     @Query("""
         SELECT * FROM messages 
         WHERE serverId = :serverId AND appId = :appId
-        ORDER BY date DESC
+        ORDER BY id DESC
         LIMIT :limit OFFSET :offset
     """)
     fun getMessagesByAppPaged(serverId: Long, appId: Int, limit: Int = 50, offset: Int = 0): Flow<List<MessageEntity>>
 
-    @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
-    suspend fun getMessageById(id: Long): MessageEntity?
+    @Query("SELECT * FROM messages WHERE serverId = :serverId AND id = :id LIMIT 1")
+    suspend fun getMessageById(serverId: Long, id: Long): MessageEntity?
 
     @Query("""
         SELECT * FROM messages 
         WHERE serverId = :serverId 
-          AND (title LIKE '%' || :query || '%' OR message LIKE '%' || :query || '%')
-        ORDER BY date DESC
+          AND (title LIKE '%' || :query || '%' ESCAPE '\\' OR message LIKE '%' || :query || '%' ESCAPE '\\')
+        ORDER BY id DESC
         LIMIT 100
     """)
     fun searchMessages(serverId: Long, query: String): Flow<List<MessageEntity>>
@@ -136,25 +144,43 @@ interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessages(messages: List<MessageEntity>)
 
-    @Query("UPDATE messages SET isRead = 1 WHERE id = :id")
-    suspend fun markAsRead(id: Long)
+    @Query("UPDATE messages SET isRead = 1 WHERE serverId = :serverId AND id = :id")
+    suspend fun markAsRead(serverId: Long, id: Long)
 
     @Query("UPDATE messages SET isRead = 1 WHERE serverId = :serverId")
     suspend fun markAllAsRead(serverId: Long)
 
 
 
-    @Query("DELETE FROM messages WHERE id = :id")
-    suspend fun deleteMessage(id: Long)
+    @Query("DELETE FROM messages WHERE serverId = :serverId AND id = :id")
+    suspend fun deleteMessage(serverId: Long, id: Long)
 
     @Query("DELETE FROM messages WHERE serverId = :serverId AND appId = :appId")
     suspend fun deleteMessagesByApp(serverId: Long, appId: Int)
 
+    @Query("DELETE FROM messages WHERE serverId = :serverId AND appId = :appId AND id NOT IN (:remoteIds)")
+    suspend fun deleteMissingForApp(serverId: Long, appId: Int, remoteIds: List<Long>)
+
+    @Query("SELECT id FROM messages WHERE serverId = :serverId")
+    suspend fun getMessageIds(serverId: Long): List<Long>
+
+    @Query("SELECT id FROM messages WHERE serverId = :serverId AND appId = :appId")
+    suspend fun getMessageIdsForApp(serverId: Long, appId: Int): List<Long>
+
+    @Query("DELETE FROM messages WHERE serverId = :serverId AND id IN (:messageIds)")
+    suspend fun deleteMessagesByIds(serverId: Long, messageIds: List<Long>)
+
+    @Query("DELETE FROM messages WHERE serverId = :serverId AND appId = :appId AND id IN (:messageIds)")
+    suspend fun deleteMessagesByIdsForApp(serverId: Long, appId: Int, messageIds: List<Long>)
+
     @Query("DELETE FROM messages WHERE serverId = :serverId")
     suspend fun deleteAllMessages(serverId: Long)
 
-    @Query("DELETE FROM messages WHERE cachedAt < :olderThan")
-    suspend fun evictOldMessages(olderThan: Long)
+    @Query("DELETE FROM messages WHERE serverId = :serverId AND cachedAt < :olderThan")
+    suspend fun evictOldMessages(serverId: Long, olderThan: Long)
+
+    @Query("DELETE FROM messages WHERE serverId = :serverId AND id NOT IN (:remoteIds)")
+    suspend fun deleteMissing(serverId: Long, remoteIds: List<Long>)
 }
 
 @Dao
@@ -163,8 +189,8 @@ interface ApplicationDao {
     @Query("SELECT * FROM applications WHERE serverId = :serverId ORDER BY name ASC")
     fun getApplications(serverId: Long): Flow<List<ApplicationEntity>>
 
-    @Query("SELECT * FROM applications WHERE id = :id LIMIT 1")
-    suspend fun getApplicationById(id: Int): ApplicationEntity?
+    @Query("SELECT * FROM applications WHERE serverId = :serverId AND id = :id LIMIT 1")
+    suspend fun getApplicationById(serverId: Long, id: Int): ApplicationEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertApplications(apps: List<ApplicationEntity>)
@@ -172,8 +198,17 @@ interface ApplicationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertApplication(app: ApplicationEntity)
 
-    @Query("DELETE FROM applications WHERE id = :id")
-    suspend fun deleteApplication(id: Int)
+    @Query("DELETE FROM applications WHERE serverId = :serverId AND id = :id")
+    suspend fun deleteApplication(serverId: Long, id: Int)
+
+    @Query("DELETE FROM applications WHERE serverId = :serverId AND id NOT IN (:remoteIds)")
+    suspend fun deleteMissing(serverId: Long, remoteIds: List<Int>)
+
+    @Query("SELECT id FROM applications WHERE serverId = :serverId")
+    suspend fun getApplicationIds(serverId: Long): List<Int>
+
+    @Query("DELETE FROM applications WHERE serverId = :serverId AND id IN (:applicationIds)")
+    suspend fun deleteApplicationsByIds(serverId: Long, applicationIds: List<Int>)
 
     @Query("DELETE FROM applications WHERE serverId = :serverId")
     suspend fun deleteAllForServer(serverId: Long)
@@ -187,8 +222,8 @@ interface ApplicationDao {
         MessageEntity::class,
         ApplicationEntity::class
     ],
-    version = 1,
-    exportSchema = false
+    version = 2,
+    exportSchema = true
 )
 abstract class GotifyDatabase : RoomDatabase() {
     abstract fun serverDao(): ServerDao

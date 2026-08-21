@@ -21,12 +21,6 @@
     <!-- Restart after boot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- Battery optimization bypass request -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- Wake lock to keep WebSocket alive -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <!-- ── Application ──────────────────────────────────────────────────────── -->
 
     <application
@@ -39,7 +33,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:supportsRtl="true"
-        tools:targetApi="36">
+        tools:targetApi="37">
 
         <!-- ── Main Activity ──────────────────────────────────────────────── -->
 
@@ -54,7 +48,7 @@
             </intent-filter>
 
             <!-- Deep link: gotifyclient://message/{id} -->
-            <intent-filter android:autoVerify="true">
+            <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -78,7 +72,7 @@
         <receiver
             android:name=".service.BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
