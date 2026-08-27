@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -73,6 +74,7 @@ fun AppInboxScreen(
     modifier: Modifier = Modifier
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
+    var messagePendingDelete by remember { mutableStateOf<GotifyMessage?>(null) }
     val pullState = rememberPullToRefreshState()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -170,7 +172,7 @@ fun AppInboxScreen(
                             date = message.date,
                             isRead = message.isRead,
                             onClick = { onMessageClick(message) },
-                            onDelete = { onDeleteMessage(message.id) }
+                            onDelete = { messagePendingDelete = message }
                         )
                     }
                     if (cacheSyncTruncated) {
@@ -218,6 +220,27 @@ fun AppInboxScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    messagePendingDelete?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { messagePendingDelete = null },
+            icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Delete message?") },
+            text = { Text("This permanently removes the message from Gotify and this device.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteMessage(pending.id)
+                        messagePendingDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { messagePendingDelete = null }) { Text("Cancel") }
             }
         )
     }

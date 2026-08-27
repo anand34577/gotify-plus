@@ -15,14 +15,17 @@ import androidx.compose.ui.unit.*
 import com.gotify.client.data.model.GotifyServer
 import com.gotify.client.ui.components.ConnectionDot
 import com.gotify.client.ui.components.ConnectionStatus
+import com.gotify.client.ui.viewmodel.ServerInfoUiState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerSwitcherSheet(
     servers: List<GotifyServer>,
     connectionStatus: ConnectionStatus,
+    serverInfo: ServerInfoUiState,
     onSwitchServer: (Long) -> Unit,
     onRemoveServer: (Long) -> Unit,
+    onRefreshInfo: () -> Unit,
     onAddServer: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -37,11 +40,69 @@ fun ServerSwitcherSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Server",
+                "Server control",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
+
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ConnectionDot(connectionStatus)
+                        Text(
+                            when (connectionStatus) {
+                                ConnectionStatus.CONNECTED -> "Stream is live"
+                                ConnectionStatus.CONNECTING -> "Connecting…"
+                                ConnectionStatus.ERROR -> "Connection needs attention"
+                                ConnectionStatus.DISCONNECTED -> "Stream is offline"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    if (serverInfo.version != null || serverInfo.health != null) {
+                        Text(
+                            buildString {
+                                serverInfo.version?.let { append("Gotify $it") }
+                                serverInfo.health?.let {
+                                    if (isNotEmpty()) append("  ·  ")
+                                    append("Health: $it")
+                                }
+                                serverInfo.database?.let {
+                                    if (isNotEmpty()) append("  ·  DB: $it")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                        )
+                    } else if (serverInfo.errorMessage != null) {
+                        Text(
+                            serverInfo.errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                        )
+                    }
+                    TextButton(
+                        onClick = onRefreshInfo,
+                        enabled = !serverInfo.isLoading,
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(if (serverInfo.isLoading) "Checking server…" else "Check server")
+                    }
+                }
+            }
 
             servers.forEach { server ->
                 ServerRow(
@@ -157,11 +218,14 @@ private fun ServerRow(
             }
 
             if (server.isActive) {
-                Icon(Icons.Outlined.CheckCircle, "Active server", tint = MaterialTheme.colorScheme.primary)
-            } else {
-                IconButton(onClick = onRemove) {
-                    Icon(Icons.Outlined.Delete, "Remove server")
-                }
+                Icon(
+                    Icons.Outlined.CheckCircle,
+                    "Active server",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Outlined.DeleteOutline, "Remove server")
             }
 
         }

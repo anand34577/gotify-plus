@@ -1,6 +1,5 @@
 package com.gotify.client.ui.components
 
-import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -27,6 +26,7 @@ import androidx.core.net.toUri
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.net.URI
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -306,15 +306,16 @@ fun MessageCard(
 
 internal fun shouldAttachGotifyKey(imageUrl: String, token: String, authBaseUrl: String): Boolean {
     if (token.isBlank() || authBaseUrl.isBlank()) return false
-    val image = imageUrl.toUri()
-    val base = authBaseUrl.toUri()
+    val image = runCatching { URI(imageUrl) }.getOrNull() ?: return false
+    val base = runCatching { URI(authBaseUrl) }.getOrNull() ?: return false
     return image.scheme in setOf("http", "https") &&
         base.scheme in setOf("http", "https") &&
+        image.scheme.equals(base.scheme, ignoreCase = true) &&
         image.host.equals(base.host, ignoreCase = true) &&
         effectivePort(image) == effectivePort(base)
 }
 
-private fun effectivePort(uri: Uri): Int = when {
+private fun effectivePort(uri: URI): Int = when {
     uri.port != -1 -> uri.port
     uri.scheme.equals("https", ignoreCase = true) -> 443
     else -> 80

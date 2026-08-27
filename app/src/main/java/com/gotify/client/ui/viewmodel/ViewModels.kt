@@ -39,15 +39,23 @@ class AppStartupViewModel @Inject constructor(
                 ?: domains.firstOrNull { it.first.isActive }?.first?.id
             val activeId = preferredId?.takeIf { id ->
                 domains.firstOrNull { it.first.id == id }?.second?.clientToken?.isNotBlank() == true
-            } ?: domains.firstOrNull { it.second.clientToken.isNotBlank() }?.first?.id
+            }
 
             if (activeId != null) serverDao.switchActiveServer(activeId)
             else serverDao.deactivateAll()
+            serverManager.reset()
             prefs.setActiveServerId(activeId ?: -1L)
 
             domains.forEach { (entity, domain) ->
                 val shouldActivate = domain.clientToken.isNotBlank() && entity.id == activeId
-                serverManager.addServer(domain.copy(isActive = shouldActivate))
+                val added = serverManager.addServer(domain.copy(isActive = shouldActivate))
+                if (!added) {
+                    // Do not leave startup suspended forever when an old row
+                    // contains a URL that is no longer accepted.
+                    serverDao.updateServer(entity.copy(isActive = false))
+                    if (shouldActivate) prefs.setActiveServerId(-1L)
+                    return@forEach
+                }
                 if (entity.isActive != shouldActivate) {
                     serverDao.updateServer(entity.copy(isActive = shouldActivate))
                 }
@@ -79,7 +87,11 @@ class LoginViewModel @Inject constructor(
 
     fun loginWithPassword(serverUrl: String, username: String, password: String, serverName: String = "") {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, loginSuccess = false) }
+            if (username.isBlank() || password.isBlank()) {
+                _uiState.update { it.copy(isLoading = false, errorMessage = "Enter your username and password") }
+                return@launch
+            }
             val trimmedUrl = validateServerUrl(serverUrl) ?: run {
                 _uiState.update { it.copy(isLoading = false, errorMessage = "Enter a valid HTTPS server URL") }
                 return@launch
@@ -120,12 +132,17 @@ class LoginViewModel @Inject constructor(
 
     fun loginWithToken(serverUrl: String, token: String, serverName: String = "") {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, loginSuccess = false) }
+            val trimmedToken = token.trim()
+            if (trimmedToken.isBlank()) {
+                _uiState.update { it.copy(isLoading = false, errorMessage = "Enter a client token") }
+                return@launch
+            }
             val trimmedUrl = validateServerUrl(serverUrl) ?: run {
                 _uiState.update { it.copy(isLoading = false, errorMessage = "Enter a valid HTTPS server URL") }
                 return@launch
             }
-            val server = GotifyServer(name = serverName.ifBlank { trimmedUrl }, baseUrl = trimmedUrl, clientToken = token, isActive = true)
+            val server = GotifyServer(name = serverName.ifBlank { trimmedUrl }, baseUrl = trimmedUrl, clientToken = trimmedToken, isActive = true)
             when (val result = safeApiCall { NetworkClientFactory.create(server).messages.getMessages(limit = 1) }) {
                 is ApiResult.Success -> try {
                     saveAndActivate(server, 0)
@@ -144,19 +161,30 @@ class LoginViewModel @Inject constructor(
     private suspend fun saveAndActivate(server: GotifyServer, clientId: Int) {
         serverDao.deactivateAll()
         val existing = serverDao.getServerByBaseUrl(server.baseUrl)
-        val entity = server.copy(id = existing?.id ?: 0).toEntity(clientId).copy(
+        val entity = server.copy(id = existing?.id ?: 0).toEntity(
+            clientId.takeIf { it > 0 } ?: existing?.clientId ?: 0
+        ).copy(
             isActive = true,
             addedAt = existing?.addedAt ?: System.currentTimeMillis()
         )
         val newId = serverDao.insertServer(entity)
         prefs.setActiveServerId(newId)
-        serverManager.addServer(server.copy(id = newId, isActive = true))
+        check(serverManager.addServer(server.copy(id = newId, isActive = true))) {
+            "Unable to activate the saved server"
+        }
     }
 
     private fun validateServerUrl(raw: String): String? {
         val url = raw.trim().trimEnd('/').toHttpUrlOrNull() ?: return null
+        if (url.username.isNotEmpty() || url.password.isNotEmpty() ||
+            url.query != null || url.fragment != null
+        ) return null
         if (url.scheme != "https" && url.host !in setOf("localhost", "127.0.0.1", "10.0.2.2")) return null
         return url.toString().trimEnd('/')
+    }
+
+    fun clearLoginSuccess() {
+        _uiState.update { it.copy(loginSuccess = false) }
     }
 }
 
@@ -209,6 +237,7 @@ class HomeViewModel @Inject constructor(
     private var messageJob: Job? = null
     private var appJob:     Job? = null
     private var unreadJob:  Job? = null
+    private var countJob:   Job? = null
     private var syncJob:    Job? = null
     private val pageLimit = MutableStateFlow(50)
 
@@ -236,13 +265,14 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun startObservingData(server: GotifyServer) {
-        messageJob?.cancel(); appJob?.cancel(); unreadJob?.cancel()
+        messageJob?.cancel(); appJob?.cancel(); unreadJob?.cancel(); countJob?.cancel()
         pageLimit.value = 50
         _uiState.update {
             it.copy(
                 messages = emptyList(),
                 applications = emptyList(),
                 unreadCount = 0,
+                cachedMessageCount = 0,
                 isLoading = true,
                 isRefreshing = false,
                 hasMorePages = false,
@@ -269,47 +299,59 @@ class HomeViewModel @Inject constructor(
                 _uiState.update { it.copy(unreadCount = count) }
             }
         }
+        countJob = viewModelScope.launch {
+            messageDao.getMessageCount(server.id).collect { count ->
+                _uiState.update { it.copy(cachedMessageCount = count) }
+            }
+        }
     }
 
     private fun syncFromServer(server: GotifyServer) {
-        val api = serverManager.apiClient ?: return
+        val api = serverManager.apiClient ?: run {
+            _uiState.update { it.copy(isRefreshing = false, errorMessage = "No active server connection") }
+            return
+        }
         syncJob?.cancel()
         syncJob = viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, errorMessage = null) }
-            when (val result = ApplicationRepository(api).getApplications()) {
-                is ApiResult.Success -> {
-                    val entities = result.data.map { app ->
-                        app.toEntity(server.id, applicationDao.getApplicationById(server.id, app.id)?.token)
+            try {
+                when (val result = ApplicationRepository(api).getApplications()) {
+                    is ApiResult.Success -> {
+                        val entities = result.data.map { app ->
+                            app.toEntity(server.id, applicationDao.getApplicationById(server.id, app.id)?.token)
+                        }
+                        if (entities.isEmpty()) applicationDao.deleteAllForServer(server.id)
+                        else {
+                            applicationDao.insertApplications(entities)
+                            applicationDao.deleteMissingSafely(server.id, entities.map { it.id })
+                        }
                     }
-                    if (entities.isEmpty()) applicationDao.deleteAllForServer(server.id)
-                    else {
-                        applicationDao.insertApplications(entities)
-                        applicationDao.deleteMissingSafely(server.id, entities.map { it.id })
-                    }
+                    is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
+                    else -> Unit
                 }
-                is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
-                else -> Unit
-            }
-            when (val result = MessageRepository(api).getAllMessages()) {
-                is ApiResult.Success -> {
-                    val sync = result.data
-                    _uiState.update { it.copy(cacheSyncTruncated = !sync.complete) }
-                    messageDao.insertMessages(sync.messages.map { message ->
-                        message.toEntity(server.id, messageDao.getMessageById(server.id, message.id)?.isRead ?: false)
-                    })
-                    if (sync.complete) {
-                        val remoteIds = sync.messages.map { it.id }
-                        if (remoteIds.isEmpty()) messageDao.deleteAllMessages(server.id)
-                        else messageDao.deleteMissingSafely(server.id, remoteIds)
+                when (val result = MessageRepository(api).getAllMessages()) {
+                    is ApiResult.Success -> {
+                        val sync = result.data
+                        val readIds = messageDao.getReadMessageIds(server.id).toHashSet()
+                        _uiState.update { it.copy(cacheSyncTruncated = !sync.complete) }
+                        messageDao.insertMessages(sync.messages.map { message ->
+                            message.toEntity(server.id, readIds.contains(message.id))
+                        })
+                        if (sync.complete) {
+                            val remoteIds = sync.messages.map { it.id }
+                            if (remoteIds.isEmpty()) messageDao.deleteAllMessages(server.id)
+                            else messageDao.deleteMissingSafely(server.id, remoteIds)
+                        }
+                        messageDao.evictOldMessages(server.id, System.currentTimeMillis() - CACHE_RETENTION_MS)
+                        prefs.setLastSyncTimestamp(System.currentTimeMillis())
                     }
-                    messageDao.evictOldMessages(server.id, System.currentTimeMillis() - CACHE_RETENTION_MS)
-                    prefs.setLastSyncTimestamp(System.currentTimeMillis())
+                    is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
+                    else -> Unit
                 }
-                is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
-                else -> Unit
-            }
-            if (serverManager.activeServer.value?.id == server.id) {
-                _uiState.update { it.copy(isRefreshing = false) }
+            } finally {
+                if (currentCoroutineContext().isActive && serverManager.activeServer.value?.id == server.id) {
+                    _uiState.update { it.copy(isRefreshing = false) }
+                }
             }
         }
     }
@@ -322,7 +364,11 @@ class HomeViewModel @Inject constructor(
 
     fun deleteMessage(messageId: Long) {
         val server = serverManager.activeServer.value ?: return
-        val api = serverManager.apiClient ?: return
+        val api = serverManager.apiClient
+        if (api == null) {
+            _uiState.update { it.copy(errorMessage = "No active server connection") }
+            return
+        }
         viewModelScope.launch {
             when (val result = MessageRepository(api).deleteMessage(messageId)) {
                 is ApiResult.Success -> messageDao.deleteMessage(server.id, messageId)
@@ -334,7 +380,11 @@ class HomeViewModel @Inject constructor(
 
     fun deleteAllMessages() {
         val server = serverManager.activeServer.value ?: return
-        val api = serverManager.apiClient ?: return
+        val api = serverManager.apiClient
+        if (api == null) {
+            _uiState.update { it.copy(errorMessage = "No active server connection") }
+            return
+        }
         viewModelScope.launch {
             when (val result = MessageRepository(api).deleteAllMessages()) {
                 is ApiResult.Success -> messageDao.deleteAllMessages(server.id)
@@ -354,6 +404,7 @@ class HomeViewModel @Inject constructor(
 data class HomeUiState(
     val messages:     List<GotifyMessage>         = emptyList(),
     val applications: List<GotifyApplication>     = emptyList(),
+    val cachedMessageCount: Int                   = 0,
     val isLoading:    Boolean                     = true,
     val isRefreshing: Boolean                     = false,
     val hasMorePages: Boolean                     = false,
@@ -363,6 +414,10 @@ data class HomeUiState(
 )
 
 private const val CACHE_RETENTION_MS = 90L * 24 * 60 * 60 * 1000
+
+private fun ServerEntity.safeApiClient() = runCatching {
+    NetworkClientFactory.create(toDomain(), isDebug = BuildConfig.DEBUG)
+}.getOrNull()
 
 private suspend fun MessageDao.deleteMissingSafely(serverId: Long, remoteIds: List<Long>) {
     val remoteIdSet = remoteIds.toHashSet()
@@ -452,7 +507,7 @@ class MessageDetailViewModel @Inject constructor(
             val serverId = resolvedServerId.takeIf { it > 0 } ?: return@launch
             val active = serverManager.activeServer.value
             val api = if (active?.id == serverId) serverManager.apiClient else {
-                serverDao.getServerById(serverId)?.toDomain()?.let { NetworkClientFactory.create(it) }
+                serverDao.getServerById(serverId)?.safeApiClient()
             }
             when (val result = api?.let { MessageRepository(it).deleteMessage(messageId) }) {
                 is ApiResult.Success -> {
@@ -539,7 +594,10 @@ class AppsViewModel @Inject constructor(
     fun refresh() { serverManager.activeServer.value?.let { syncAppsFromServer(it) } }
 
     private fun syncAppsFromServer(server: GotifyServer) {
-        val api = serverManager.apiClient ?: return
+        val api = serverManager.apiClient ?: run {
+            _uiState.update { it.copy(isRefreshing = false, errorMessage = "No active server connection") }
+            return
+        }
         syncJob?.cancel()
         syncJob = viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, errorMessage = null) }
@@ -558,8 +616,12 @@ class AppsViewModel @Inject constructor(
     }
 
     fun createApplication(name: String, description: String) {
-        val api      = serverManager.apiClient ?: return
-        val serverId = serverManager.activeServer.value?.id ?: return
+        val api      = serverManager.apiClient
+        val serverId = serverManager.activeServer.value?.id
+        if (api == null || serverId == null) {
+            _uiState.update { it.copy(errorMessage = "No active server connection") }
+            return
+        }
         viewModelScope.launch {
             val result = ApplicationRepository(api).createApplication(name, description)
             if (result is ApiResult.Success) applicationDao.insertApplication(result.data.toEntity(serverId))
@@ -567,9 +629,33 @@ class AppsViewModel @Inject constructor(
         }
     }
 
+    fun updateApplication(appId: Int, name: String, description: String) {
+        val api      = serverManager.apiClient
+        val serverId = serverManager.activeServer.value?.id
+        if (api == null || serverId == null) {
+            _uiState.update { it.copy(errorMessage = "No active server connection") }
+            return
+        }
+        viewModelScope.launch {
+            val existing = applicationDao.getApplicationById(serverId, appId)
+            val result = ApplicationRepository(api).updateApplication(appId, name, description)
+            when (result) {
+                is ApiResult.Success -> applicationDao.insertApplication(
+                    result.data.toEntity(serverId, existing?.token)
+                )
+                is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
+                ApiResult.Loading -> Unit
+            }
+        }
+    }
+
     fun deleteApplication(appId: Int) {
-        val api      = serverManager.apiClient ?: return
-        val serverId = serverManager.activeServer.value?.id ?: return
+        val api      = serverManager.apiClient
+        val serverId = serverManager.activeServer.value?.id
+        if (api == null || serverId == null) {
+            _uiState.update { it.copy(errorMessage = "No active server connection") }
+            return
+        }
         viewModelScope.launch {
             val app = applicationDao.getApplicationById(serverId, appId) ?: return@launch
             if (app.internal) return@launch
@@ -582,8 +668,12 @@ class AppsViewModel @Inject constructor(
     }
 
     fun deleteAppMessages(appId: Int) {
-        val api      = serverManager.apiClient ?: return
-        val serverId = serverManager.activeServer.value?.id ?: return
+        val api      = serverManager.apiClient
+        val serverId = serverManager.activeServer.value?.id
+        if (api == null || serverId == null) {
+            _uiState.update { it.copy(errorMessage = "No active server connection") }
+            return
+        }
         viewModelScope.launch {
             val result = MessageRepository(api).deleteMessagesByApp(appId)
             if (result is ApiResult.Success) {
@@ -648,17 +738,26 @@ class SettingsViewModel @Inject constructor(
     
     fun logout(onLoggedOut: () -> Unit) {
         viewModelScope.launch {
-            val server = serverManager.activeServer.value
+            val servers = serverDao.getAllServers().first()
+            val active = serverManager.activeServer.value
 
 
-            if (server != null) {
+            if (active != null) {
                 serverManager.apiClient?.let { api ->
-                    val clientId = serverDao.getServerById(server.id)?.clientId ?: 0
+                    val clientId = serverDao.getServerById(active.id)?.clientId ?: 0
                     if (clientId > 0) {
-                        AuthRepository(api).logout(clientId)
+                        withTimeoutOrNull(5_000) { AuthRepository(api).logout(clientId) }
                     }
                 }
 
+                serverDao.deleteServer(active.id)
+                messageDao.deleteAllMessages(active.id)
+                applicationDao.deleteAllForServer(active.id)
+            }
+
+            // Remove inactive servers as well so a future startup cannot
+            // silently reactivate a credential the user intended to remove.
+            servers.filterNot { it.id == active?.id }.forEach { server ->
                 serverDao.deleteServer(server.id)
                 messageDao.deleteAllMessages(server.id)
                 applicationDao.deleteAllForServer(server.id)
@@ -669,7 +768,9 @@ class SettingsViewModel @Inject constructor(
             serverManager.reset()
 
 
-            prefs.clearAll()
+            // Keep appearance and notification preferences; only the active
+            // server selection belongs to the account session.
+            prefs.setActiveServerId(-1L)
 
             onLoggedOut()
         }
@@ -708,14 +809,22 @@ class AppInboxViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             val requested = requestedServerId.takeIf { it > 0 }
-            val serverId = requested?.takeIf { serverDao.getServerById(it) != null }
-                ?: serverManager.activeServer.value?.id
-                ?: return@launch
+            val serverId = if (requested != null) {
+                requested.takeIf { serverDao.getServerById(it) != null }
+            } else {
+                serverManager.activeServer.value?.id
+            } ?: run {
+                _uiState.update { it.copy(isLoading = false, errorMessage = "Server not found") }
+                return@launch
+            }
             resolvedServerId = serverId
             _serverId.value = serverId
             val server = serverDao.getServerById(serverId)?.toDomain()
                 ?: serverManager.activeServer.value?.takeIf { it.id == serverId }
-                ?: return@launch
+                ?: run {
+                    _uiState.update { it.copy(isLoading = false, errorMessage = "Server not found") }
+                    return@launch
+                }
             _serverBaseUrl.value = server.baseUrl
             _clientToken.value = server.clientToken
             val app = applicationDao.getApplicationById(serverId, appId)
@@ -741,12 +850,13 @@ class AppInboxViewModel @Inject constructor(
             val api = if (serverManager.activeServer.value?.id == serverId) {
                 serverManager.apiClient
             } else {
-                serverDao.getServerById(serverId)?.toDomain()?.let { NetworkClientFactory.create(it) }
+                serverDao.getServerById(serverId)?.safeApiClient()
             }
             when (val result = api?.let { MessageRepository(it).deleteMessage(messageId) }) {
                 is ApiResult.Success -> messageDao.deleteMessage(serverId, messageId)
                 is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
-                else -> Unit
+                null -> _uiState.update { it.copy(errorMessage = "No active server connection") }
+                ApiResult.Loading -> Unit
             }
         }
     }
@@ -757,12 +867,13 @@ class AppInboxViewModel @Inject constructor(
             val api = if (serverManager.activeServer.value?.id == serverId) {
                 serverManager.apiClient
             } else {
-                serverDao.getServerById(serverId)?.toDomain()?.let { NetworkClientFactory.create(it) }
+                serverDao.getServerById(serverId)?.safeApiClient()
             }
             when (val result = api?.let { MessageRepository(it).deleteMessagesByApp(appId) }) {
                 is ApiResult.Success -> messageDao.deleteMessagesByApp(serverId, appId)
                 is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
-                else -> Unit
+                null -> _uiState.update { it.copy(errorMessage = "No active server connection") }
+                ApiResult.Loading -> Unit
             }
         }
     }
@@ -774,7 +885,7 @@ class AppInboxViewModel @Inject constructor(
             val api = if (serverManager.activeServer.value?.id == serverId) {
                 serverManager.apiClient
             } else {
-                serverDao.getServerById(serverId)?.toDomain()?.let { NetworkClientFactory.create(it) }
+                serverDao.getServerById(serverId)?.safeApiClient()
             }
             _uiState.update { it.copy(isRefreshing = true, errorMessage = null) }
             if (api == null) {
@@ -785,9 +896,10 @@ class AppInboxViewModel @Inject constructor(
             when (val result = MessageRepository(api).getAllMessagesByApp(appId)) {
                 is ApiResult.Success -> {
                     val sync = result.data
+                    val readIds = messageDao.getReadMessageIdsForApp(serverId, appId).toHashSet()
                     _uiState.update { it.copy(cacheSyncTruncated = !sync.complete) }
                     messageDao.insertMessages(sync.messages.map { message ->
-                        message.toEntity(serverId, messageDao.getMessageById(serverId, message.id)?.isRead ?: false)
+                        message.toEntity(serverId, readIds.contains(message.id))
                     })
                     if (sync.complete) {
                         val remoteIds = sync.messages.map { it.id }
@@ -883,6 +995,10 @@ class ServersViewModel @Inject constructor(
     private val applicationDao:   ApplicationDao
 ) : ViewModel() {
 
+    private val _serverInfo = MutableStateFlow(ServerInfoUiState())
+    val serverInfo: StateFlow<ServerInfoUiState> = _serverInfo.asStateFlow()
+    private var serverInfoJob: Job? = null
+
     val servers: StateFlow<List<GotifyServer>> = serverDao.getAllServers()
         .map { it.map { e -> e.toDomain() } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -898,12 +1014,54 @@ class ServersViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionStatus.DISCONNECTED)
 
+    init {
+        viewModelScope.launch {
+            serverManager.activeServer
+                .map { it?.id }
+                .distinctUntilChanged()
+                .collect {
+                    _serverInfo.value = ServerInfoUiState()
+                    refreshServerInfo()
+                }
+        }
+    }
+
+    fun refreshServerInfo() {
+        serverInfoJob?.cancel()
+        val serverId = serverManager.activeServer.value?.id
+        val api = serverManager.apiClient ?: run {
+            _serverInfo.value = ServerInfoUiState(errorMessage = "No active server connection")
+            return
+        }
+        serverInfoJob = viewModelScope.launch {
+            _serverInfo.update { it.copy(isLoading = true, errorMessage = null) }
+            val repository = AuthRepository(api)
+            val version = repository.getServerVersion()
+            val health = repository.getServerHealth()
+            if (!isActive || serverManager.activeServer.value?.id != serverId) return@launch
+            val error = listOfNotNull(
+                (version as? ApiResult.Error)?.message,
+                (health as? ApiResult.Error)?.message
+            ).firstOrNull()
+            _serverInfo.value = ServerInfoUiState(
+                version = (version as? ApiResult.Success)?.data?.version,
+                health = (health as? ApiResult.Success)?.data?.health,
+                database = (health as? ApiResult.Success)?.data?.database,
+                isLoading = false,
+                errorMessage = error
+            )
+        }
+    }
+
     fun switchServer(serverId: Long) {
         viewModelScope.launch {
+            val target = serverDao.getServerById(serverId) ?: return@launch
+            if (!serverManager.addServer(target.toDomain().copy(isActive = true))) {
+                _serverInfo.update { it.copy(errorMessage = "This server has an invalid URL") }
+                return@launch
+            }
             serverDao.switchActiveServer(serverId)
             prefs.setActiveServerId(serverId)
-            val target = serverDao.getServerById(serverId) ?: return@launch
-            serverManager.addServer(target.toDomain().copy(isActive = true))
         }
     }
 
@@ -921,6 +1079,14 @@ class ServersViewModel @Inject constructor(
         }
     }
 }
+
+data class ServerInfoUiState(
+    val version: String? = null,
+    val health: String? = null,
+    val database: String? = null,
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null
+)
 
 private fun GotifyApplication.resolvedFor(server: GotifyServer): GotifyApplication = copy(
     image = when {

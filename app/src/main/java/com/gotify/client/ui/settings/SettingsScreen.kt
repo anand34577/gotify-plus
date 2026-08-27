@@ -169,7 +169,7 @@ fun SettingsScreen(
                 ClickableSettingsRow(
                     icon      = Icons.AutoMirrored.Outlined.Logout,
                     title     = "Sign out",
-                    subtitle  = "Remove server and sign out",
+                    subtitle  = "Remove saved servers and credentials from this device",
                     onClick   = { showLogoutDialog = true },
                     tintError = true
                 )
@@ -203,7 +203,7 @@ fun SettingsScreen(
             onDismissRequest = { showLogoutDialog = false },
             icon    = { Icon(Icons.AutoMirrored.Outlined.Logout, null, tint = MaterialTheme.colorScheme.error) },
             title   = { Text("Sign out?") },
-            text    = { Text("This removes \"${state.serverName}\" from this device and attempts to revoke its client token. Gotify 3 may require you to revoke it from the server web UI because deletion requires an elevated session.") },
+            text    = { Text("This removes every saved server and its local cache from this device. The active client token will also be revoked when the server accepts the request.") },
             confirmButton = {
                 Button(
                     onClick = { onLogout(); showLogoutDialog = false },

@@ -1,5 +1,9 @@
 package com.gotify.client.ui.detail
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -14,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
@@ -25,6 +28,7 @@ import com.gotify.client.ui.components.*
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import com.gotify.client.util.launchGotifyAction
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,9 +45,10 @@ fun MessageDetailScreen(
     serverBaseUrl: String = "",
     errorMessage: String? = null
 ) {
-    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    var showDeleteDialog by remember { mutableStateOf(false) }
     val applicationImageUrl = application?.image?.let { image ->
         resolveAppImageUrl(serverBaseUrl, image)
     }
@@ -54,6 +59,9 @@ fun MessageDetailScreen(
 
 
     val isMarkdown = markdownEnabled && message.extras?.display?.contentType == "text/markdown"
+    val hasRemoteMarkdownImage = isMarkdown && remember(message.message) {
+        Regex("!\\[[^]]*]\\(\\s*https?://", RegexOption.IGNORE_CASE).containsMatchIn(message.message)
+    }
 
     Scaffold(
         modifier = modifier,
@@ -67,7 +75,41 @@ fun MessageDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onDelete) {
+                    IconButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(
+                                ClipData.newPlainText("Gotify message", message.message)
+                            )
+                            coroutineScope.launch { snackbarHostState.showSnackbar("Message copied") }
+                        }
+                    ) {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy message")
+                    }
+                    IconButton(
+                        onClick = {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(
+                                    Intent.EXTRA_TEXT,
+                                    listOfNotNull(
+                                        message.title.takeIf { it.isNotBlank() },
+                                        message.message
+                                    ).joinToString("\n\n")
+                                )
+                            }
+                            runCatching {
+                                context.startActivity(
+                                    Intent.createChooser(shareIntent, "Share message")
+                                )
+                            }.onFailure {
+                                coroutineScope.launch { snackbarHostState.showSnackbar("No sharing app is available") }
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Outlined.Share, contentDescription = "Share message")
+                    }
+                    IconButton(onClick = { showDeleteDialog = true }) {
                         Icon(
                             Icons.Outlined.DeleteOutline,
                             contentDescription = "Delete",
@@ -92,6 +134,26 @@ fun MessageDetailScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
+
+            if (hasRemoteMarkdownImage) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.tertiaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Outlined.Visibility, contentDescription = null)
+                        Text(
+                            "This message includes remote images. Loading them may reveal your IP address to the image host.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -191,14 +253,11 @@ fun MessageDetailScreen(
             if (!actionUrl.isNullOrBlank()) {
                 Button(
                     onClick  = {
-                        runCatching { uriHandler.openUri(actionUrl) }
-                            .onFailure { error ->
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        error.message ?: "Unable to open this action"
-                                    )
-                                }
+                        if (!context.launchGotifyAction(actionUrl)) {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Unable to open this action")
                             }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape    = RoundedCornerShape(12.dp)
@@ -214,6 +273,27 @@ fun MessageDetailScreen(
 
             Spacer(Modifier.height(40.dp))
         }
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            icon = { Icon(Icons.Outlined.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Delete message?") },
+            text = { Text("This permanently removes the message from Gotify and this device.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteDialog = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 

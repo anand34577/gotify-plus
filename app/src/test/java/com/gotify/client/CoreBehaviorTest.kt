@@ -4,6 +4,7 @@ import com.gotify.client.data.db.toEntity
 import com.gotify.client.data.model.GotifyMessage
 import com.gotify.client.notification.Priority
 import com.gotify.client.ui.apps.resolveAppImageUrl
+import com.gotify.client.ui.components.shouldAttachGotifyKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -29,5 +30,33 @@ class CoreBehaviorTest {
         assertEquals(Priority.LOW, Priority.fromInt(3))
         assertEquals(Priority.NORMAL, Priority.fromInt(7))
         assertEquals(Priority.HIGH, Priority.fromInt(8))
+    }
+
+    @Test
+    fun imageCredentialsStayOnTheSameOriginAndScheme() {
+        assertEquals(
+            true,
+            shouldAttachGotifyKey(
+                "https://example.test/image.png",
+                "token",
+                "https://example.test"
+            )
+        )
+        assertEquals(
+            false,
+            shouldAttachGotifyKey(
+                "http://example.test/image.png",
+                "token",
+                "https://example.test"
+            )
+        )
+        assertEquals(
+            false,
+            shouldAttachGotifyKey(
+                "https://cdn.test/image.png",
+                "token",
+                "https://example.test"
+            )
+        )
     }
 }

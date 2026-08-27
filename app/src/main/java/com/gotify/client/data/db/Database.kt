@@ -136,6 +136,9 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE serverId = :serverId AND isRead = 0")
     fun getUnreadCount(serverId: Long): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM messages WHERE serverId = :serverId")
+    fun getMessageCount(serverId: Long): Flow<Int>
+
 
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -164,8 +167,14 @@ interface MessageDao {
     @Query("SELECT id FROM messages WHERE serverId = :serverId")
     suspend fun getMessageIds(serverId: Long): List<Long>
 
+    @Query("SELECT id FROM messages WHERE serverId = :serverId AND isRead = 1")
+    suspend fun getReadMessageIds(serverId: Long): List<Long>
+
     @Query("SELECT id FROM messages WHERE serverId = :serverId AND appId = :appId")
     suspend fun getMessageIdsForApp(serverId: Long, appId: Int): List<Long>
+
+    @Query("SELECT id FROM messages WHERE serverId = :serverId AND appId = :appId AND isRead = 1")
+    suspend fun getReadMessageIdsForApp(serverId: Long, appId: Int): List<Long>
 
     @Query("DELETE FROM messages WHERE serverId = :serverId AND id IN (:messageIds)")
     suspend fun deleteMessagesByIds(serverId: Long, messageIds: List<Long>)

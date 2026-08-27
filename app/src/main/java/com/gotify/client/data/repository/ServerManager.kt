@@ -32,7 +32,16 @@ class ServerManager @Inject constructor(
     val apiClient: GotifyApiClient? get() = _apiClient
 
     
-    fun addServer(server: GotifyServer) {
+    fun addServer(server: GotifyServer): Boolean {
+        // Saved data can outlive a URL validation rule change. Validate active
+        // servers before mutating in-memory state so one bad row cannot leave
+        // the manager half-switched or crash startup.
+        if (server.isActive) {
+            if (server.clientToken.isBlank()) return false
+            runCatching { NetworkClientFactory.create(server, isDebug = BuildConfig.DEBUG) }
+                .onFailure { return false }
+        }
+
         val existing = _servers.value.toMutableList()
 
 
@@ -55,13 +64,15 @@ class ServerManager @Inject constructor(
         _servers.value = existing
 
         if (newServer.isActive) activateServer(newServer)
+        return true
     }
 
     
-    fun switchServer(serverId: Long) {
-        val target = _servers.value.find { it.id == serverId } ?: return
+    fun switchServer(serverId: Long): Boolean {
+        val target = _servers.value.find { it.id == serverId } ?: return false
+        if (!addServer(target.copy(isActive = true))) return false
         _servers.value = _servers.value.map { it.copy(isActive = it.id == serverId) }
-        activateServer(target)
+        return true
     }
 
     
