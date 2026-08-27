@@ -63,27 +63,43 @@ fun MainNavHost(
     val showBottomBar = currentRoute in bottomNavDestinations.map { it.route }
     var showServerSheet by remember { mutableStateOf(false) }
 
-    Scaffold(
-        modifier  = modifier,
-        bottomBar = {
-            AnimatedVisibility(
-                visible = showBottomBar,
-                enter   = slideInVertically(initialOffsetY = { it }),
-                exit    = slideOutVertically(targetOffsetY = { it })
-            ) {
-                GotifyBottomBar(navController = navController, currentRoute = currentRoute)
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val useNavigationRail = maxWidth >= 600.dp
+
+        Row(Modifier.fillMaxSize()) {
+            if (useNavigationRail) {
+                GotifyNavigationRail(
+                    navController = navController,
+                    currentRoute = currentRoute
+                )
             }
-        }
-    ) { innerPadding ->
-        NavHost(
-            navController      = navController,
-            startDestination   = Routes.HOME,
-            modifier           = Modifier.padding(innerPadding),
-            enterTransition    = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 10 } },
-            exitTransition     = { fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { -it / 10 } },
-            popEnterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 10 } },
-            popExitTransition  = { fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { it / 10 } }
-        ) {
+
+            Scaffold(
+                modifier = Modifier.weight(1f),
+                bottomBar = {
+                    if (!useNavigationRail) {
+                        AnimatedVisibility(
+                            visible = showBottomBar,
+                            enter = slideInVertically(initialOffsetY = { it }),
+                            exit = slideOutVertically(targetOffsetY = { it })
+                        ) {
+                            GotifyBottomBar(
+                                navController = navController,
+                                currentRoute = currentRoute
+                            )
+                        }
+                    }
+                }
+            ) { innerPadding ->
+                NavHost(
+                    navController      = navController,
+                    startDestination   = Routes.HOME,
+                    modifier           = Modifier.padding(innerPadding),
+                    enterTransition    = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 10 } },
+                    exitTransition     = { fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { -it / 10 } },
+                    popEnterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 10 } },
+                    popExitTransition  = { fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { it / 10 } }
+                ) {
 
             composable(Routes.HOME) {
                 val vm: HomeViewModel = hiltViewModel()
@@ -101,6 +117,7 @@ fun MainNavHost(
                     connectionStatus    = connStatus,
                     activeServerName    = serverName,
                     unreadCount         = uiState.unreadCount,
+                    cachedMessageCount  = uiState.cachedMessageCount,
                     cacheSyncTruncated  = uiState.cacheSyncTruncated,
                     isLoading           = uiState.isLoading,
                     isRefreshing        = uiState.isRefreshing,
@@ -135,7 +152,8 @@ fun MainNavHost(
                     onAppClick          = { navController.navigate(Routes.appInbox(it.id)) },
                     onDeleteApp         = vm::deleteApplication,
                     onDeleteAppMessages = vm::deleteAppMessages,
-                    onCreateApp         = vm::createApplication
+                    onCreateApp         = vm::createApplication,
+                    onEditApp           = vm::updateApplication
                 )
             }
 
@@ -282,6 +300,8 @@ fun MainNavHost(
                     onLoginWithToken = vm::loginWithToken
                 )
             }
+                }
+            }
         }
     }
 
@@ -289,13 +309,19 @@ fun MainNavHost(
         val vm: ServersViewModel = hiltViewModel()
         val servers    by vm.servers.collectAsStateWithLifecycle()
         val connStatus by vm.connectionStatus.collectAsStateWithLifecycle()
+        val serverInfo by vm.serverInfo.collectAsStateWithLifecycle()
 
         ServerSwitcherSheet(
             servers          = servers,
             connectionStatus = connStatus,
+            serverInfo       = serverInfo,
             onSwitchServer   = vm::switchServer,
             onRemoveServer   = vm::removeServer,
-            onAddServer      = { navController.navigate(Routes.ADD_SERVER) },
+            onRefreshInfo    = vm::refreshServerInfo,
+            onAddServer      = {
+                showServerSheet = false
+                navController.navigate(Routes.ADD_SERVER)
+            },
             onDismiss        = { showServerSheet = false }
         )
     }
@@ -341,6 +367,63 @@ private fun GotifyBottomBar(
                     selectedIconColor = MaterialTheme.colorScheme.primary,
                     selectedTextColor = MaterialTheme.colorScheme.primary,
                     indicatorColor    = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun GotifyNavigationRail(
+    navController: NavController,
+    currentRoute: String?
+) {
+    NavigationRail(
+        modifier = Modifier
+            .fillMaxHeight()
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        header = {
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.padding(top = 8.dp, bottom = 20.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.NotificationsActive,
+                    contentDescription = "Gotify+",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(14.dp).size(28.dp)
+                )
+            }
+        }
+    ) {
+        bottomNavDestinations.forEach { dest ->
+            val selected = currentRoute == dest.route
+            NavigationRailItem(
+                selected = selected,
+                onClick = {
+                    if (!selected) {
+                        navController.navigate(dest.route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
+                icon = {
+                    Icon(
+                        imageVector = if (selected) dest.selectedIcon else dest.icon,
+                        contentDescription = dest.label
+                    )
+                },
+                label = { Text(dest.label) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer
                 )
             )
         }

@@ -10,6 +10,7 @@ import com.gotify.client.data.api.GotifyWebSocketManager
 import com.gotify.client.data.db.MessageDao
 import com.gotify.client.data.db.ApplicationDao
 import com.gotify.client.data.db.ServerDao
+import com.gotify.client.data.db.CredentialCipher
 import com.gotify.client.data.db.toEntity
 import com.gotify.client.data.db.toDomain
 import com.gotify.client.data.datastore.PreferencesRepository
@@ -99,7 +100,23 @@ class GotifyListenerService : Service() {
                 stopSelf()
                 return
             }
-            serverManager.addServer(entity.toDomain())
+            val server = entity.toDomain().copy(isActive = true)
+            runCatching {
+                check(server.clientToken.isNotBlank()) { "Saved server token is unavailable" }
+                check(serverManager.addServer(server)) { "Invalid saved server URL" }
+                if (!CredentialCipher.isEncrypted(entity.clientToken)) {
+                    serverDao.updateServer(
+                        entity.copy(
+                            clientToken = CredentialCipher.encrypt(entity.clientToken).orEmpty(),
+                            isActive = true
+                        )
+                    )
+                }
+            }.onFailure { error ->
+                Log.e(TAG, "Unable to restore the saved server", error)
+                stopSelf()
+                return
+            }
         }
         observeWebSocket()
         observeActiveServer()
@@ -209,10 +226,7 @@ class GotifyListenerService : Service() {
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, GotifyListenerService::class.java).apply {
-                action = ACTION_STOP
-            }
-            context.startService(intent)
+            context.stopService(Intent(context, GotifyListenerService::class.java))
         }
     }
 }

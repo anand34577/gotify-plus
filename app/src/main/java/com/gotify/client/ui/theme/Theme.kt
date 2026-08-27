@@ -17,28 +17,28 @@ import androidx.core.view.WindowCompat
 
 
 
-val GotifyBlue        = Color(0xFF0A84FF)
-val GotifyBlueDark    = Color(0xFF0066CC)
-val GotifyBlueLight   = Color(0xFF5AC8FA)
+val GotifyBlue        = Color(0xFF55B7FF)
+val GotifyBlueDark    = Color(0xFF0068B7)
+val GotifyBlueLight   = Color(0xFF9DD5FF)
 
 
-val SurfaceDark       = Color(0xFF0D1117)
-val SurfaceDark2      = Color(0xFF161B22)
-val SurfaceDark3      = Color(0xFF21262D)
-val SurfaceBorder     = Color(0xFF30363D)
+val SurfaceDark       = Color(0xFF0B1220)
+val SurfaceDark2      = Color(0xFF131C2D)
+val SurfaceDark3      = Color(0xFF1D2A40)
+val SurfaceBorder     = Color(0xFF33445F)
 
 
-val AccentGreen       = Color(0xFF3FB950)
-val AccentOrange      = Color(0xFFD29922)
-val AccentRed         = Color(0xFFF85149)
-val AccentPurple      = Color(0xFFBC8CFF)
+val AccentGreen       = Color(0xFF40C49D)
+val AccentOrange      = Color(0xFFD88921)
+val AccentRed         = Color(0xFFE2535F)
+val AccentPurple      = Color(0xFFD7A8FF)
 
 
 
 private val DarkColorScheme = darkColorScheme(
     primary            = GotifyBlue,
     onPrimary          = Color.White,
-    primaryContainer   = Color(0xFF003566),
+    primaryContainer   = Color(0xFF123B5D),
     onPrimaryContainer = GotifyBlueLight,
 
     secondary          = Color(0xFF8B949E),
@@ -80,12 +80,12 @@ private val LightColorScheme = lightColorScheme(
     secondaryContainer = Color(0xFFF6F8FA),
     onSecondaryContainer = Color(0xFF24292F),
 
-    background         = Color(0xFFF6F8FA),
+    background         = Color(0xFFF5F7FB),
     onBackground       = Color(0xFF24292F),
 
     surface            = Color.White,
     onSurface          = Color(0xFF24292F),
-    surfaceVariant     = Color(0xFFF6F8FA),
+    surfaceVariant     = Color(0xFFEEF2F9),
     onSurfaceVariant   = Color(0xFF57606A),
 
     outline            = Color(0xFFD0D7DE),
@@ -102,11 +102,11 @@ val GotifyTypography = Typography(
 )
 
 val GotifyShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
+    extraSmall = RoundedCornerShape(6.dp),
     small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp)
 )
 
 
@@ -132,8 +132,10 @@ fun GotifyTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            WindowCompat.getInsetsController(window, view)
-                .isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package com.gotify.client.util
 
 import android.util.Log
 import com.gotify.client.data.model.ApiResult
+import com.google.gson.JsonParser
 import retrofit2.Response
 import kotlinx.coroutines.CancellationException
 
@@ -51,10 +52,11 @@ suspend fun safeApiCallUnit(call: suspend () -> Response<Unit>): ApiResult<Unit>
 
 
 private fun parseErrorMessage(raw: String): String {
-    return try {
-        val regex = """"errorDescription"\s*:\s*"([^"]+)"""".toRegex()
-        regex.find(raw)?.groupValues?.get(1) ?: raw
-    } catch (e: Exception) {
-        raw
-    }
+    val parsed = runCatching {
+        JsonParser.parseString(raw)
+            .asJsonObject
+            .get("errorDescription")
+            ?.asString
+    }.getOrNull()
+    return parsed?.takeIf { it.isNotBlank() } ?: raw.trim().take(300)
 }

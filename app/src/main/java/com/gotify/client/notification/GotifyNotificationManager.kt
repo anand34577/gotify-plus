@@ -4,7 +4,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.RingtoneManager
@@ -13,11 +12,11 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.net.toUri
 import com.gotify.client.data.datastore.PreferencesRepository
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
 import com.gotify.client.R
+import com.gotify.client.util.gotifyActionIntent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -87,7 +86,7 @@ class GotifyNotificationManager @Inject constructor(
         )
         createChannel(
             id         = highSilentChannelId(serverId, app.id),
-            name       = "${app.name} — High (silent)",
+            name       = "${app.name} — High (no vibration)",
             importance = NotificationManager.IMPORTANCE_HIGH,
             sound      = true,
             vibrate    = false
@@ -141,11 +140,7 @@ class GotifyNotificationManager @Inject constructor(
         val actionUrl = message.extras?.notification?.click?.url
             ?: message.extras?.action?.onClick?.intentUrl
         if (!actionUrl.isNullOrBlank()) {
-            val targetIntent = try {
-                Intent.parseUri(actionUrl, Intent.URI_INTENT_SCHEME)
-            } catch (_: Exception) {
-                Intent(Intent.ACTION_VIEW, actionUrl.toUri())
-            }
+            val targetIntent = gotifyActionIntent(actionUrl)
             val actionIntent = PendingIntent.getActivity(
                 context, stableId(serverId, message.id),
                 targetIntent,
@@ -154,8 +149,9 @@ class GotifyNotificationManager @Inject constructor(
             builder.addAction(R.drawable.ic_notification, "Open", actionIntent)
         }
 
-        with(NotificationManagerCompat.from(context)) {
-            notify(stableId(serverId, message.id), builder.build())
+        runCatching {
+            NotificationManagerCompat.from(context)
+                .notify(stableId(serverId, message.id), builder.build())
         }
     }
 

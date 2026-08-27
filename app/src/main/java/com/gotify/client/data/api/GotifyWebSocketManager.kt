@@ -126,6 +126,7 @@ class GotifyWebSocketManager @Inject constructor(
 
     private fun scheduleReconnect() {
         if (manuallyDisconnected || currentBaseUrl.isBlank() || currentToken.isBlank()) return
+        if (retryJob?.isActive == true) return
 
         val delay = (RETRY_BASE_DELAY_MS * (1L shl retryAttempt.coerceAtMost(6)))
             .coerceAtMost(RETRY_MAX_DELAY_MS)
@@ -136,6 +137,7 @@ class GotifyWebSocketManager @Inject constructor(
             if (!isActive) return@launch
             delay(delay)
             if (isActive) {
+                retryJob = null
                 retryAttempt++
                 openSocket()
             }
@@ -162,6 +164,7 @@ class GotifyWebSocketManager @Inject constructor(
                 return
             }
             Log.d(TAG, "WebSocket connected")
+            cancelRetry()
             retryAttempt = 0
             emit(StreamState.Connected)
         }

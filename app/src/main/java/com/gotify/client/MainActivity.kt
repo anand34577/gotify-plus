@@ -93,7 +93,8 @@ class MainActivity : ComponentActivity() {
                         onLoginWithToken = { url, token, name ->
                             loginViewModel.loginWithToken(url, token, serverName = name)
                         },
-                        onDeepLinkConsumed = { pendingMessageId = null; pendingServerId = null }
+                        onDeepLinkConsumed = { pendingMessageId = null; pendingServerId = null },
+                        onLoginSuccessConsumed = loginViewModel::clearLoginSuccess
                     )
                 }
             }
@@ -124,24 +125,25 @@ private fun AppContent(
     loginState:          LoginUiState,
     onLoginWithPassword: (url: String, username: String, password: String, serverName: String) -> Unit,
     onLoginWithToken:    (url: String, token: String, serverName: String) -> Unit,
-    onDeepLinkConsumed:  () -> Unit
+    onDeepLinkConsumed:  () -> Unit,
+    onLoginSuccessConsumed: () -> Unit
 ) {
     val navController = rememberNavController()
 
     LaunchedEffect(deepLinkMessageId, deepLinkServerId, isLoggedIn, loginState.loginSuccess) {
-        if (isLoggedIn || loginState.loginSuccess) deepLinkMessageId?.let {
-            navController.navigate(Routes.detail(it, deepLinkServerId))
-            onDeepLinkConsumed()
-        }
-    }
+        if (!isLoggedIn) return@LaunchedEffect
 
-    LaunchedEffect(loginState.loginSuccess) {
-        if (loginState.loginSuccess && deepLinkMessageId == null) {
+        if (deepLinkMessageId != null) {
+            navController.navigate(Routes.detail(deepLinkMessageId, deepLinkServerId))
+            onDeepLinkConsumed()
+        } else if (loginState.loginSuccess) {
             navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
         }
+
+        if (loginState.loginSuccess) onLoginSuccessConsumed()
     }
 
-    if (!isLoggedIn && !loginState.loginSuccess) {
+    if (!isLoggedIn) {
         LoginScreen(
             isLoading            = loginState.isLoading,
             errorMessage         = loginState.errorMessage,

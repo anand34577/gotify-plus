@@ -78,6 +78,7 @@ fun ApplicationsScreen(
     onDeleteApp: (Int) -> Unit,
     onDeleteAppMessages: (Int) -> Unit,
     onCreateApp: (name: String, description: String) -> Unit,
+    onEditApp: (appId: Int, name: String, description: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showCreateSheet by remember { mutableStateOf(false) }
@@ -97,9 +98,6 @@ fun ApplicationsScreen(
 
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Outlined.Refresh, "Refresh")
-                    }
-                    IconButton(onClick = { showCreateSheet = true }) {
-                        Icon(Icons.Outlined.Add, "Add application")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -131,6 +129,10 @@ fun ApplicationsScreen(
         ) {
             if (isLoading && applications.isEmpty()) {
                 LazyColumn(
+                    modifier            = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 960.dp)
+                        .align(Alignment.TopCenter),
                     contentPadding      = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -153,6 +155,10 @@ fun ApplicationsScreen(
                 }
             } else {
                 LazyColumn(
+                    modifier            = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 960.dp)
+                        .align(Alignment.TopCenter),
                     contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -175,7 +181,10 @@ fun ApplicationsScreen(
                             messageCount     = messageCounts[app.id] ?: 0,
                             onClick          = { onAppClick(app) },
                             onDelete         = { onDeleteApp(app.id) },
-                            onClearMessages  = { onDeleteAppMessages(app.id) }
+                            onClearMessages  = { onDeleteAppMessages(app.id) },
+                            onEdit          = { name, description ->
+                                onEditApp(app.id, name, description)
+                            }
                         )
                     }
                     item { Spacer(Modifier.height(80.dp)) }
@@ -185,8 +194,9 @@ fun ApplicationsScreen(
     }
 
     if (showCreateSheet) {
-        CreateApplicationSheet(
-            onCreate  = { name, desc -> onCreateApp(name, desc); showCreateSheet = false },
+        ApplicationEditorSheet(
+            title     = "New application",
+            onSave   = { name, desc -> onCreateApp(name, desc); showCreateSheet = false },
             onDismiss = { showCreateSheet = false }
         )
     }
@@ -204,10 +214,13 @@ private fun ApplicationCard(
     onClick:          () -> Unit,
     onDelete:         () -> Unit,
     onClearMessages:  () -> Unit,
+    onEdit:           (name: String, description: String) -> Unit,
     modifier:         Modifier = Modifier
 ) {
     var showMenu    by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showEditSheet by remember { mutableStateOf(false) }
 
     Card(
         onClick   = onClick,
@@ -276,12 +289,23 @@ private fun ApplicationCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
-                    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (application.token != null) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ) {
                         Text(
-                            application.token?.let { "Token: ${it.take(8)}…" } ?: "Token hidden by server",
+                            if (application.token != null) "Token saved" else "Token unavailable",
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style    = MaterialTheme.typography.labelSmall,
-                            color    = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (application.token != null) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
                     if (messageCount > 0) {
@@ -308,10 +332,17 @@ private fun ApplicationCard(
                         leadingIcon = { Icon(Icons.Outlined.Inbox, null) },
                         onClick     = { onClick(); showMenu = false }
                     )
+                    if (!application.internal) {
+                        DropdownMenuItem(
+                            text        = { Text("Edit application") },
+                            leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                            onClick     = { showEditSheet = true; showMenu = false }
+                        )
+                    }
                     DropdownMenuItem(
                         text        = { Text("Clear messages") },
                         leadingIcon = { Icon(Icons.Outlined.ClearAll, null) },
-                        onClick     = { onClearMessages(); showMenu = false }
+                        onClick     = { showClearConfirm = true; showMenu = false }
                     )
                     if (!application.internal) {
                         HorizontalDivider()
@@ -340,15 +371,52 @@ private fun ApplicationCard(
             dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancel") } }
         )
     }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            icon = { Icon(Icons.Outlined.ClearAll, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Clear ${application.name} messages?") },
+            text = { Text("All cached and server messages from this application will be deleted.") },
+            confirmButton = {
+                Button(
+                    onClick = { onClearMessages(); showClearConfirm = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Clear messages") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showEditSheet) {
+        ApplicationEditorSheet(
+            title = "Edit application",
+            initialName = application.name,
+            initialDescription = application.description,
+            onSave = { name, description ->
+                onEdit(name, description)
+                showEditSheet = false
+            },
+            onDismiss = { showEditSheet = false }
+        )
+    }
 }
 
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CreateApplicationSheet(onCreate: (String, String) -> Unit, onDismiss: () -> Unit) {
-    var name        by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
+private fun ApplicationEditorSheet(
+    title: String,
+    initialName: String = "",
+    initialDescription: String = "",
+    onSave: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name        by remember { mutableStateOf(initialName) }
+    var description by remember { mutableStateOf(initialDescription) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -359,7 +427,7 @@ private fun CreateApplicationSheet(onCreate: (String, String) -> Unit, onDismiss
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("New Application", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
             OutlinedTextField(
                 value = name, onValueChange = { name = it },
@@ -374,11 +442,11 @@ private fun CreateApplicationSheet(onCreate: (String, String) -> Unit, onDismiss
                 maxLines = 3, shape = RoundedCornerShape(12.dp)
             )
             Button(
-                onClick  = { if (name.isNotBlank()) onCreate(name.trim(), description.trim()) },
+                onClick  = { if (name.isNotBlank()) onSave(name.trim(), description.trim()) },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 enabled  = name.isNotBlank(),
                 shape    = RoundedCornerShape(12.dp)
-            ) { Text("Create Application", fontWeight = FontWeight.SemiBold) }
+            ) { Text(if (initialName.isBlank()) "Create application" else "Save changes", fontWeight = FontWeight.SemiBold) }
         }
     }
 }

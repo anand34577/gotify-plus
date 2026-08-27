@@ -172,6 +172,15 @@ fun LoginScreen(
                             FilterChip(selected = !useToken, onClick = { useToken = false }, label = { Text("Password") })
                             FilterChip(selected = useToken, onClick = { useToken = true }, label = { Text("Client token") })
                         }
+                        Text(
+                            text = if (useToken) {
+                                "Use a client token from Gotify when you do not want to share a password with this device."
+                            } else {
+                                "Gotify will create a dedicated client token for this device."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         if (useToken) {
                             LoginField(
                                 value = token,

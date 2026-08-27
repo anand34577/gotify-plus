@@ -34,6 +34,11 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 - **Pull-to-refresh** on both messages and applications screens
 - **Battery optimization guidance** — opens Android's battery settings so the user can review background restrictions
 - **Boot receiver** — listener service auto-restarts after device reboot
+- **Adaptive navigation** — bottom navigation on phones and a navigation rail on larger windows
+- **Server control sheet** — switch servers, inspect connection/version/health, and remove saved servers
+- **Application management** — create, edit, clear, and delete applications with confirmation for destructive actions
+- **Message actions** — copy or share message content, and safely open Gotify URL/intent actions
+- **Credential hygiene** — application tokens are not displayed in the UI; sign out clears all local server credentials and caches
 
 ---
 
@@ -44,7 +49,7 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 | UI                   | Jetpack Compose + Material 3 |
 | Architecture         | MVVM + Clean Architecture    |
 | Dependency Injection | Hilt                         |
-| Networking           | Retrofit 2 + OkHttp 4        |
+| Networking           | Retrofit 3 + OkHttp 5        |
 | Real-time            | OkHttp WebSocket             |
 | Local DB             | Room                         |
 | Preferences          | DataStore                    |
@@ -58,6 +63,8 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 
 - Android 8.0+ (API 26)
 - A running [Gotify server](https://gotify.net/docs/install)
+
+This repository contains the Android client only. The Gotify server's browser UI is a separate codebase and is not present here; changing that UI requires the Gotify server repository (including its `ui/` directory).
 
 ---
 
@@ -143,8 +150,11 @@ app/
 | `DELETE /message`                  | Delete all messages                  |
 | `GET /application`                 | List applications                    |
 | `POST /application`                | Create application                   |
+| `PUT /application/{id}`            | Edit application                     |
 | `DELETE /application/{id}`         | Delete application                   |
 | `DELETE /application/{id}/message` | Clear app messages                   |
+| `GET /health`                      | Inspect server health                |
+| `POST /application/{id}/image`     | API available; UI upload is pending  |
 | `GET /stream`                      | WebSocket — real-time message stream |
 | `GET /version`                     | Verify server reachability           |
 

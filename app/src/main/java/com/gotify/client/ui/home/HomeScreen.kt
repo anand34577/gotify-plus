@@ -28,6 +28,7 @@ fun HomeScreen(
     connectionStatus:    ConnectionStatus,
     activeServerName:    String,
     unreadCount:         Int,
+    cachedMessageCount:  Int,
     cacheSyncTruncated:  Boolean,
     isLoading:           Boolean,
     isRefreshing:        Boolean,
@@ -44,6 +45,7 @@ fun HomeScreen(
     modifier:            Modifier = Modifier
 ) {
     var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var messagePendingDelete by remember { mutableStateOf<GotifyMessage?>(null) }
     val snackbarHostState   = remember { SnackbarHostState() }
 
     LaunchedEffect(errorMessage) {
@@ -52,6 +54,12 @@ fun HomeScreen(
 
     // ── FIX 1: filter state lives HERE, not inside AppFilterChips ─────────────
     var selectedAppId by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(applications) {
+        if (selectedAppId != null && applications.none { it.id == selectedAppId }) {
+            selectedAppId = null
+        }
+    }
 
     val appMap = remember(applications) { applications.associateBy { it.id } }
 
@@ -87,6 +95,10 @@ fun HomeScreen(
             modifier     = Modifier.fillMaxSize().padding(paddingValues)
         ) {
             LazyColumn(
+                modifier            = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 960.dp)
+                    .align(Alignment.TopCenter),
                 contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -94,10 +106,39 @@ fun HomeScreen(
                 item(key = "summary") {
                     HomeSummaryCard(
                         unreadCount = unreadCount,
-                        cachedCount = messages.size,
+                        cachedCount = cachedMessageCount,
                         connectionStatus = connectionStatus,
                         cacheSyncTruncated = cacheSyncTruncated
                     )
+                }
+
+                errorMessage?.let { error ->
+                    item(key = "sync_error") {
+                        Surface(
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.CloudOff,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = onRefresh) { Text("Retry") }
+                            }
+                        }
+                    }
                 }
 
                 // Filter chips
@@ -154,7 +195,7 @@ fun HomeScreen(
                             date        = message.date,
                             isRead      = message.isRead,
                             onClick     = { onMessageClick(message) },
-                            onDelete    = { onDeleteMessage(message.id) }
+                            onDelete    = { messagePendingDelete = message }
                         )
                     }
                 }
@@ -187,6 +228,27 @@ fun HomeScreen(
                 ) { Text("Delete all") }
             },
             dismissButton = { TextButton(onClick = { showDeleteAllDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    messagePendingDelete?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { messagePendingDelete = null },
+            icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Delete message?") },
+            text = { Text("This permanently removes the message from Gotify and this device.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteMessage(pending.id)
+                        messagePendingDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { messagePendingDelete = null }) { Text("Cancel") }
+            }
         )
     }
 }
@@ -230,7 +292,7 @@ private fun HomeSummaryCard(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        "Inbox overview",
+                        "Live stream",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         fontWeight = FontWeight.SemiBold
@@ -255,13 +317,13 @@ private fun HomeSummaryCard(
                 }
             }
             Text(
-                text = if (unreadCount == 0) "You're all caught up" else "$unreadCount unread message${if (unreadCount == 1) "" else "s"}",
+                text = if (unreadCount == 0) "All clear" else "$unreadCount to review",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "$cachedCount message${if (cachedCount == 1) "" else "s"} cached on this device",
+                text = "$cachedCount cached message${if (cachedCount == 1) "" else "s"}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
             )
@@ -360,12 +422,21 @@ private fun AppFilterChips(
     clientToken:   String,
     authBaseUrl:   String,
     selectedAppId: Int?,          // ← controlled by parent
-    onSelectApp:   (Int) -> Unit  // ← parent decides toggle logic
+    onSelectApp:   (Int?) -> Unit  // ← parent decides toggle logic
 ) {
     Row(
         modifier              = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        FilterChip(
+            selected = selectedAppId == null,
+            onClick = { onSelectApp(null) },
+            label = { Text("All") },
+            leadingIcon = {
+                Icon(Icons.Outlined.AllInbox, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            shape = RoundedCornerShape(8.dp)
+        )
         applications.forEach { app ->
             val isSelected = selectedAppId == app.id
             FilterChip(

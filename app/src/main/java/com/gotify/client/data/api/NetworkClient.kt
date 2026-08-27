@@ -7,6 +7,7 @@ import com.gotify.client.data.model.GotifyServer
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -40,7 +41,7 @@ class TokenAuthInterceptor(
 
 fun buildBasicAuth(username: String, password: String): String {
     val credentials = "$username:$password"
-    val encoded = Base64.encodeToString(credentials.toByteArray(), Base64.NO_WRAP)
+    val encoded = Base64.encodeToString(credentials.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
     return "Basic $encoded"
 }
 
@@ -55,7 +56,18 @@ object NetworkClientFactory {
 
     
     fun create(server: GotifyServer, isDebug: Boolean = false): GotifyApiClient {
-        val baseUrl = server.baseUrl.trimEnd('/') + "/"
+        val parsedUrl = server.baseUrl.trimEnd('/').toHttpUrlOrNull()
+            ?: throw IllegalArgumentException("Invalid Gotify server URL")
+        require(parsedUrl.scheme == "http" || parsedUrl.scheme == "https") {
+            "Gotify server URL must use HTTP or HTTPS"
+        }
+        require(
+            parsedUrl.username.isEmpty() && parsedUrl.password.isEmpty() &&
+                parsedUrl.query == null && parsedUrl.fragment == null
+        ) {
+            "Gotify server URL must not contain credentials or a query"
+        }
+        val baseUrl = parsedUrl.toString().trimEnd('/') + "/"
 
         val okHttpClient = buildOkHttpClient(
             tokenProvider = { server.clientToken },
