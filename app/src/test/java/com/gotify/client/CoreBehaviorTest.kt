@@ -76,9 +76,13 @@ class CoreBehaviorTest {
 
     @Test
     fun gotifyDefaultAppImageFallsBackToInitials() {
-        assertNull(resolveAppImageUrl("https://example.test", "static/defaultapp.jpg"))
-        assertNull(resolveAppImageUrl("https://example.test", "https://example.test/static/defaultapp.jpg"))
-        assertNull(resolveAppImageUrl("https://example.test/gotify", "https://example.test/gotify/static/defaultapp.jpg"))
+        // Exact value the Gotify server returns (api/application.go withResolvedImage)
+        assertNull(resolveAppImageUrl("https://example.test", "static/defaultapp.png"))
+        assertNull(resolveAppImageUrl("https://example.test", "https://example.test/static/defaultapp.png"))
+        assertNull(resolveAppImageUrl("https://example.test/gotify", "https://example.test/gotify/static/defaultapp.png"))
+        assertNull(resolveAppImageUrl("https://example.test", "/static/defaultapp.jpg"))
+        // Real uploaded icons still resolve
+        assertEquals("https://example.test/image/abc.png", resolveAppImageUrl("https://example.test", "image/abc.png"))
     }
 
     @Test

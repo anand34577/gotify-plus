@@ -17,7 +17,8 @@ android {
         applicationId = "com.gotify.client"
         minSdk        = 26
         targetSdk     = 37
-        versionCode   = 1
+        // CI run number keeps every published release upgradable over the previous one.
+        versionCode   = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionName   = "1.0.0"
     }
 
@@ -37,6 +38,9 @@ android {
 
     buildTypes {
         debug {
+            // Separate package so a debug-key install never blocks installing the signed release.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix   = "-debug"
             isDebuggable   = true
             buildConfigField("Boolean", "IS_DEBUG", "true")
         }

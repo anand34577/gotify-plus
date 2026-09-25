@@ -24,12 +24,13 @@ import java.net.URI
 
 // Gotify returns "static/defaultapp.jpg" (its own logo) for apps with no custom
 // icon uploaded — treat it as "no image" so the initials avatar shows instead.
-// Matches relative, absolute and sub-path forms (e.g. https://host/gotify/static/defaultapp.jpg).
-private const val GOTIFY_DEFAULT_APP_IMAGE = "static/defaultapp.jpg"
+// Gotify server (api/application.go withResolvedImage) returns "static/defaultapp.png" for apps
+// without an uploaded icon. Match any extension and relative/absolute/sub-path forms.
+private val GOTIFY_DEFAULT_APP_IMAGE = Regex("""(^|/)static/defaultapp\.[a-z]+$""", RegexOption.IGNORE_CASE)
 
 fun resolveAppImageUrl(baseUrl: String, relativePath: String): String? {
     if (baseUrl.isBlank() || relativePath.isBlank()) return null
-    if (relativePath.substringBefore('?').endsWith(GOTIFY_DEFAULT_APP_IMAGE, ignoreCase = true)) return null
+    if (GOTIFY_DEFAULT_APP_IMAGE.containsMatchIn(relativePath.substringBefore('?'))) return null
     val candidate = if (relativePath.startsWith("https://", ignoreCase = true) ||
         relativePath.startsWith("http://", ignoreCase = true)
     ) {
