@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -34,10 +35,15 @@ fun HomeScreen(
     isRefreshing:        Boolean,
     hasMorePages:        Boolean,
     errorMessage:        String?,
+    selectedAppId:       Int?,
+    unreadOnly:          Boolean,
+    onSelectApp:         (Int?) -> Unit,
+    onToggleUnread:      () -> Unit,
     onRefresh:           () -> Unit,
     onLoadMore:          () -> Unit,
     onMessageClick:      (GotifyMessage) -> Unit,
     onDeleteMessage:     (Long) -> Unit,
+    onUndoDelete:        (Long) -> Unit,
     onDeleteAllMessages: () -> Unit,
     onMarkAllAsRead:     () -> Unit,
     onOpenServers:       () -> Unit,
@@ -45,29 +51,12 @@ fun HomeScreen(
     modifier:            Modifier = Modifier
 ) {
     var showDeleteAllDialog by remember { mutableStateOf(false) }
-    var messagePendingDelete by remember { mutableStateOf<GotifyMessage?>(null) }
     val snackbarHostState   = remember { SnackbarHostState() }
-
-    LaunchedEffect(errorMessage) {
-        errorMessage?.let { snackbarHostState.showSnackbar(it) }
-    }
-
-    // ── FIX 1: filter state lives HERE, not inside AppFilterChips ─────────────
-    var selectedAppId by remember { mutableStateOf<Int?>(null) }
-
-    LaunchedEffect(applications) {
-        if (selectedAppId != null && applications.none { it.id == selectedAppId }) {
-            selectedAppId = null
-        }
-    }
+    val deleteWithUndo      = rememberUndoableDelete(snackbarHostState, onDeleteMessage, onUndoDelete)
 
     val appMap = remember(applications) { applications.associateBy { it.id } }
-
-    // ── FIX 1: this actually filters now ──────────────────────────────────────
-    val filteredMessages = remember(messages, selectedAppId) {
-        if (selectedAppId == null) messages
-        else messages.filter { it.appId == selectedAppId }
-    }
+    // `messages` is already filtered in the database (HomeViewModel), so filters cover every cached message.
+    val sections = remember(messages) { messages.groupBy { dayLabel(it.date) } }
 
     val pullRefreshState = rememberPullToRefreshState()
 
@@ -148,11 +137,10 @@ fun HomeScreen(
                             applications  = applications,
                             clientToken   = clientToken,
                             authBaseUrl   = serverBaseUrl,
-                            selectedAppId = selectedAppId,        // ← controlled from parent
-                            onSelectApp   = { id ->
-                                // Toggle: tap selected chip again to clear filter
-                                selectedAppId = if (selectedAppId == id) null else id
-                            }
+                            selectedAppId = selectedAppId,
+                            unreadOnly    = unreadOnly,
+                            onToggleUnread = onToggleUnread,
+                            onSelectApp   = onSelectApp
                         )
                     }
                 }
@@ -163,27 +151,29 @@ fun HomeScreen(
                 }
 
                 // Empty state
-                if (!isLoading && filteredMessages.isEmpty()) {
+                if (!isLoading && messages.isEmpty()) {
                     item(key = "empty") {
-                        Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                        // Not fillParentMaxSize: the summary card above would push it into a pointless scroll.
+                        Box(Modifier.fillParentMaxWidth().padding(top = 48.dp), contentAlignment = Alignment.Center) {
                             EmptyState(
                                 icon     = Icons.Outlined.NotificationsNone,
-                                title    = if (selectedAppId != null) "No messages from this app"
-                                else "No messages yet",
+                                title    = when {
+                                    unreadOnly            -> "You're all caught up"
+                                    selectedAppId != null -> "No messages from this app"
+                                    else                  -> "No messages yet"
+                                },
                                 subtitle = "Messages from your Gotify server will appear here"
                             )
                         }
                     }
                 }
 
-                // Message cards
-                items(filteredMessages, key = { it.id }) { message ->
-                    val app = appMap[message.appId]
-                    AnimatedVisibility(
-                        visible = true,
-                        enter   = fadeIn() + slideInVertically(initialOffsetY = { it / 3 }),
-                        exit    = fadeOut() + shrinkVertically()
-                    ) {
+                sections.forEach { (label, dayMessages) ->
+                    item(key = "header_$label") {
+                        DateHeader(label, Modifier.animateItem())
+                    }
+                    items(dayMessages, key = { it.id }) { message ->
+                        val app = appMap[message.appId]
                         MessageCard(
                             title       = message.title,
                             message     = message.message,
@@ -195,7 +185,8 @@ fun HomeScreen(
                             date        = message.date,
                             isRead      = message.isRead,
                             onClick     = { onMessageClick(message) },
-                            onDelete    = { messagePendingDelete = message }
+                            onDelete    = { deleteWithUndo(message.id) },
+                            modifier    = Modifier.animateItem()
                         )
                     }
                 }
@@ -228,27 +219,6 @@ fun HomeScreen(
                 ) { Text("Delete all") }
             },
             dismissButton = { TextButton(onClick = { showDeleteAllDialog = false }) { Text("Cancel") } }
-        )
-    }
-
-    messagePendingDelete?.let { pending ->
-        AlertDialog(
-            onDismissRequest = { messagePendingDelete = null },
-            icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
-            title = { Text("Delete message?") },
-            text = { Text("This permanently removes the message from Gotify and this device.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onDeleteMessage(pending.id)
-                        messagePendingDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { messagePendingDelete = null }) { Text("Cancel") }
-            }
         )
     }
 }
@@ -408,6 +378,7 @@ private fun HomeTopBar(
                 }
             }
         },
+        expandedHeight = 56.dp,
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.background
         )
@@ -422,6 +393,8 @@ private fun AppFilterChips(
     clientToken:   String,
     authBaseUrl:   String,
     selectedAppId: Int?,          // ← controlled by parent
+    unreadOnly:    Boolean,
+    onToggleUnread: () -> Unit,
     onSelectApp:   (Int?) -> Unit  // ← parent decides toggle logic
 ) {
     Row(
@@ -434,6 +407,15 @@ private fun AppFilterChips(
             label = { Text("All") },
             leadingIcon = {
                 Icon(Icons.Outlined.AllInbox, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            shape = RoundedCornerShape(8.dp)
+        )
+        FilterChip(
+            selected = unreadOnly,
+            onClick = onToggleUnread,
+            label = { Text("Unread") },
+            leadingIcon = {
+                Icon(Icons.Outlined.MarkEmailUnread, contentDescription = null, modifier = Modifier.size(18.dp))
             },
             shape = RoundedCornerShape(8.dp)
         )

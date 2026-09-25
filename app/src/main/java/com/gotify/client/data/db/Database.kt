@@ -104,31 +104,50 @@ interface MessageDao {
 
     @Query("""
         SELECT * FROM messages 
-        WHERE serverId = :serverId 
-        ORDER BY id DESC
-        LIMIT :limit OFFSET :offset
-    """)
-    fun getMessagesPaged(serverId: Long, limit: Int = 50, offset: Int = 0): Flow<List<MessageEntity>>
-
-    @Query("""
-        SELECT * FROM messages 
         WHERE serverId = :serverId AND appId = :appId
         ORDER BY id DESC
         LIMIT :limit OFFSET :offset
     """)
     fun getMessagesByAppPaged(serverId: Long, appId: Int, limit: Int = 50, offset: Int = 0): Flow<List<MessageEntity>>
 
+    @Query("""
+        SELECT * FROM messages
+        WHERE serverId = :serverId
+          AND (:appId IS NULL OR appId = :appId)
+          AND (:unreadOnly = 0 OR isRead = 0)
+        ORDER BY id DESC
+        LIMIT :limit
+    """)
+    fun getMessagesFiltered(serverId: Long, appId: Int?, unreadOnly: Boolean, limit: Int): Flow<List<MessageEntity>>
+
     @Query("SELECT * FROM messages WHERE serverId = :serverId AND id = :id LIMIT 1")
     suspend fun getMessageById(serverId: Long, id: Long): MessageEntity?
 
+    @Query("SELECT MAX(id) FROM messages WHERE serverId = :serverId")
+    suspend fun maxMessageId(serverId: Long): Long?
+
+    @Query("SELECT * FROM messages WHERE serverId = :serverId ORDER BY id DESC LIMIT 1")
+    fun observeLatestMessage(serverId: Long): Flow<MessageEntity?>
+
+    // `date` is RFC 3339 with an offset; strftime normalises it to UTC epoch seconds.
     @Query("""
-        SELECT * FROM messages 
-        WHERE serverId = :serverId 
-          AND (title LIKE '%' || :query || '%' ESCAPE '\\' OR message LIKE '%' || :query || '%' ESCAPE '\\')
+        SELECT * FROM messages
+        WHERE serverId = :serverId
+          AND (:query = '' OR title LIKE '%' || :query || '%' ESCAPE '\' OR message LIKE '%' || :query || '%' ESCAPE '\')
+          AND (:appId IS NULL OR appId = :appId)
+          AND priority BETWEEN :minPriority AND :maxPriority
+          AND (:sinceEpochSeconds IS NULL OR CAST(strftime('%s', date) AS INTEGER) >= :sinceEpochSeconds)
         ORDER BY id DESC
-        LIMIT 100
+        LIMIT 200
     """)
-    fun searchMessages(serverId: Long, query: String): Flow<List<MessageEntity>>
+    fun searchMessages(
+        serverId: Long,
+        query: String,
+        appId: Int?,
+        minPriority: Int,
+        maxPriority: Int,
+        sinceEpochSeconds: Long?
+    ): Flow<List<MessageEntity>>
 
     @Query("SELECT COUNT(*) FROM messages WHERE serverId = :serverId AND appId = :appId")
     fun getMessageCountForApp(serverId: Long, appId: Int): Flow<Int>

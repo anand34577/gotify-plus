@@ -30,6 +30,11 @@ data class SettingsState(
     val darkThemeEnabled:     Boolean = true,
     val markdownEnabled:      Boolean = true,
     val keepAliveEnabled:     Boolean = true,
+    val quietHoursEnabled:    Boolean = false,
+    val quietStartMinutes:    Int     = 22 * 60,
+    val quietEndMinutes:      Int     = 7 * 60,
+    val appLockEnabled:       Boolean = false,
+    val serverIntentsEnabled: Boolean = false,
     val serverName:           String  = "",
     val serverUrl:            String  = "",
     val appVersion:           String  = "1.0.0"
@@ -46,11 +51,16 @@ fun SettingsScreen(
     onToggleDarkTheme:      (Boolean) -> Unit,
     onToggleMarkdown:       (Boolean) -> Unit,
     onToggleKeepAlive:      (Boolean) -> Unit,
+    onToggleQuietHours:     (Boolean) -> Unit,
+    onSetQuietHours:        (start: Int, end: Int) -> Unit,
+    onToggleAppLock:        (Boolean) -> Unit,
+    onToggleServerIntents:  (Boolean) -> Unit,
     onLogout:               () -> Unit,
     modifier:               Modifier = Modifier
 ) {
     val context = LocalContext.current
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var editingQuietStart by remember { mutableStateOf<Boolean?>(null) } // true = start, false = end
 
     Scaffold(
         modifier       = modifier,
@@ -62,6 +72,7 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
                     }
                 },
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -95,6 +106,28 @@ fun SettingsScreen(
                     onChecked = onToggleVibration,
                     enabled   = state.notificationsEnabled
                 )
+                SwitchSettingsRow(
+                    icon      = Icons.Outlined.Bedtime,
+                    title     = "Quiet hours",
+                    subtitle  = "Deliver silently; high priority (8+) still alerts",
+                    checked   = state.quietHoursEnabled,
+                    onChecked = onToggleQuietHours,
+                    enabled   = state.notificationsEnabled
+                )
+                if (state.quietHoursEnabled && state.notificationsEnabled) {
+                    ClickableSettingsRow(
+                        icon     = Icons.Outlined.Schedule,
+                        title    = "Starts",
+                        subtitle = formatMinutes(state.quietStartMinutes),
+                        onClick  = { editingQuietStart = true }
+                    )
+                    ClickableSettingsRow(
+                        icon     = Icons.Outlined.WbSunny,
+                        title    = "Ends",
+                        subtitle = formatMinutes(state.quietEndMinutes),
+                        onClick  = { editingQuietStart = false }
+                    )
+                }
                 ClickableSettingsRow(
                     icon     = Icons.Outlined.Tune,
                     title    = "Notification channels",
@@ -146,9 +179,29 @@ fun SettingsScreen(
                 SwitchSettingsRow(
                     icon      = Icons.Outlined.Sync,
                     title     = "Keep connection alive",
-                    subtitle  = "Maintain persistent WebSocket connection",
+                    subtitle  = if (state.keepAliveEnabled) "Instant delivery via a persistent connection"
+                                else "Off: checks for new messages about every 15 minutes",
                     checked   = state.keepAliveEnabled,
                     onChecked = onToggleKeepAlive
+                )
+            }
+
+            SettingsSection(title = "Privacy & security") {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    SwitchSettingsRow(
+                        icon      = Icons.Outlined.Fingerprint,
+                        title     = "App lock",
+                        subtitle  = "Require biometrics or screen lock to open",
+                        checked   = state.appLockEnabled,
+                        onChecked = onToggleAppLock
+                    )
+                }
+                SwitchSettingsRow(
+                    icon      = Icons.Outlined.Bolt,
+                    title     = "Allow server actions",
+                    subtitle  = "Let messages trigger Android broadcasts on arrival",
+                    checked   = state.serverIntentsEnabled,
+                    onChecked = onToggleServerIntents
                 )
             }
 
@@ -198,6 +251,25 @@ fun SettingsScreen(
         }
     }
 
+    editingQuietStart?.let { isStart ->
+        val initial = if (isStart) state.quietStartMinutes else state.quietEndMinutes
+        val pickerState = rememberTimePickerState(initialHour = initial / 60, initialMinute = initial % 60)
+        AlertDialog(
+            onDismissRequest = { editingQuietStart = null },
+            title = { Text(if (isStart) "Quiet hours start" else "Quiet hours end") },
+            text  = { TimePicker(state = pickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val picked = pickerState.hour * 60 + pickerState.minute
+                    if (isStart) onSetQuietHours(picked, state.quietEndMinutes)
+                    else onSetQuietHours(state.quietStartMinutes, picked)
+                    editingQuietStart = null
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { editingQuietStart = null }) { Text("Cancel") } }
+        )
+    }
+
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
@@ -217,6 +289,8 @@ fun SettingsScreen(
     }
 }
 
+private fun formatMinutes(minutes: Int): String = "%02d:%02d".format(minutes / 60, minutes % 60)
+
 @Composable
 private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column {
@@ -230,7 +304,7 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
         )
         Surface(
             shape    = MaterialTheme.shapes.large,
-            color    = MaterialTheme.colorScheme.surface,
+            color    = MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(content = content)
@@ -290,7 +364,7 @@ private fun ClickableSettingsRow(
     val tint = if (tintError) MaterialTheme.colorScheme.error
     else MaterialTheme.colorScheme.onSurfaceVariant
 
-    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface) {
+    Surface(onClick = onClick, color = androidx.compose.ui.graphics.Color.Transparent) {
         Row(
             modifier              = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment     = Alignment.CenterVertically,

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.gotify.client.BuildConfig
+import com.gotify.client.notification.GotifyNotificationManager
 
 
 
@@ -203,7 +204,8 @@ class HomeViewModel @Inject constructor(
     private val messageDao:       MessageDao,
     private val applicationDao:   ApplicationDao,
     private val webSocketManager: GotifyWebSocketManager,
-    private val prefs:            PreferencesRepository
+    private val prefs:            PreferencesRepository,
+    private val notifications:    GotifyNotificationManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -241,7 +243,13 @@ class HomeViewModel @Inject constructor(
     private var syncJob:    Job? = null
     private val pageLimit = MutableStateFlow(50)
 
+    private val _filter = MutableStateFlow(HomeFilter())
+    val filter: StateFlow<HomeFilter> = _filter.asStateFlow()
+
+    private val pendingDeletes = PendingDeletes(viewModelScope) { id -> commitDelete(id) }
+
     init {
+        // Live messages are persisted app-wide (GotifyApplication); Room flows below pick them up.
         viewModelScope.launch {
             serverManager.activeServer
                 .filterNotNull()
@@ -254,19 +262,22 @@ class HomeViewModel @Inject constructor(
                     }
                 }
         }
-        viewModelScope.launch {
-            webSocketManager.streamState.collect { state ->
-                if (state is StreamState.Message && observedServerId != -1L) {
-                    val existing = messageDao.getMessageById(observedServerId, state.message.id)
-                    messageDao.insertMessage(state.message.toEntity(observedServerId, existing?.isRead ?: false))
-                }
-            }
-        }
+    }
+
+    fun selectApp(appId: Int?) {
+        _filter.update { it.copy(appId = if (it.appId == appId) null else appId) }
+        pageLimit.value = 50
+    }
+
+    fun toggleUnreadOnly() {
+        _filter.update { it.copy(unreadOnly = !it.unreadOnly) }
+        pageLimit.value = 50
     }
 
     private fun startObservingData(server: GotifyServer) {
         messageJob?.cancel(); appJob?.cancel(); unreadJob?.cancel(); countJob?.cancel()
         pageLimit.value = 50
+        _filter.value = HomeFilter()
         _uiState.update {
             it.copy(
                 messages = emptyList(),
@@ -282,10 +293,17 @@ class HomeViewModel @Inject constructor(
         }
 
         messageJob = viewModelScope.launch {
-            pageLimit.flatMapLatest { limit -> messageDao.getMessagesPaged(server.id, limit) }
-                .collect { entities ->
+            combine(pageLimit, _filter) { limit, filter -> limit to filter }
+                .flatMapLatest { (limit, filter) ->
+                    messageDao.getMessagesFiltered(server.id, filter.appId, filter.unreadOnly, limit)
+                        .map { entities -> entities to (entities.size >= limit) }
+                }
+                .combine(pendingDeletes.ids) { (entities, hasMore), hidden ->
+                    entities.filterNot { it.id in hidden } to hasMore
+                }
+                .collect { (entities, hasMore) ->
                     _uiState.update {
-                        it.copy(messages = entities.map { e -> e.toDomain() }, isLoading = false, hasMorePages = entities.size >= pageLimit.value)
+                        it.copy(messages = entities.map { e -> e.toDomain() }, isLoading = false, hasMorePages = hasMore)
                     }
                 }
         }
@@ -362,19 +380,23 @@ class HomeViewModel @Inject constructor(
         pageLimit.update { it + 50 }
     }
 
-    fun deleteMessage(messageId: Long) {
+    fun deleteMessage(messageId: Long) = pendingDeletes.schedule(messageId)
+
+    fun undoDelete(messageId: Long) = pendingDeletes.undo(messageId)
+
+    private suspend fun commitDelete(messageId: Long) {
         val server = serverManager.activeServer.value ?: return
-        val api = serverManager.apiClient
-        if (api == null) {
+        val api = serverManager.apiClient ?: run {
             _uiState.update { it.copy(errorMessage = "No active server connection") }
             return
         }
-        viewModelScope.launch {
-            when (val result = MessageRepository(api).deleteMessage(messageId)) {
-                is ApiResult.Success -> messageDao.deleteMessage(server.id, messageId)
-                is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
-                else -> Unit
+        when (val result = MessageRepository(api).deleteMessage(messageId)) {
+            is ApiResult.Success -> {
+                messageDao.deleteMessage(server.id, messageId)
+                notifications.cancelNotification(server.id, messageId)
             }
+            is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
+            else -> Unit
         }
     }
 
@@ -387,7 +409,10 @@ class HomeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             when (val result = MessageRepository(api).deleteAllMessages()) {
-                is ApiResult.Success -> messageDao.deleteAllMessages(server.id)
+                is ApiResult.Success -> {
+                    messageDao.deleteAllMessages(server.id)
+                    notifications.cancelServerNotifications(server.id)
+                }
                 is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
                 else -> Unit
             }
@@ -396,7 +421,10 @@ class HomeViewModel @Inject constructor(
 
     fun markAllAsRead() {
         viewModelScope.launch {
-            if (observedServerId > 0) messageDao.markAllAsRead(observedServerId)
+            if (observedServerId > 0) {
+                messageDao.markAllAsRead(observedServerId)
+                notifications.cancelServerNotifications(observedServerId)
+            }
         }
     }
 }
@@ -414,6 +442,40 @@ data class HomeUiState(
 )
 
 private const val CACHE_RETENTION_MS = 90L * 24 * 60 * 60 * 1000
+// Slightly longer than SnackbarDuration.Short (4 s) so a last-moment Undo still wins.
+const val UNDO_WINDOW_MS = 5_000L
+
+/**
+ * Hides a deleted message immediately and commits the server delete after the undo window.
+ * ponytail: pending deletes are dropped (message reappears) if the ViewModel is cleared mid-window — the safe direction.
+ */
+class PendingDeletes(
+    private val scope: CoroutineScope,
+    private val commit: suspend (Long) -> Unit
+) {
+    private val _ids = MutableStateFlow<Set<Long>>(emptySet())
+    val ids: StateFlow<Set<Long>> = _ids.asStateFlow()
+    private val jobs = mutableMapOf<Long, Job>()
+
+    fun schedule(id: Long) {
+        jobs[id]?.cancel()
+        _ids.update { it + id }
+        jobs[id] = scope.launch {
+            delay(UNDO_WINDOW_MS)
+            try { commit(id) } finally {
+                jobs.remove(id)
+                _ids.update { it - id }
+            }
+        }
+    }
+
+    fun undo(id: Long) {
+        jobs.remove(id)?.cancel()
+        _ids.update { it - id }
+    }
+}
+
+data class HomeFilter(val appId: Int? = null, val unreadOnly: Boolean = false)
 
 private fun ServerEntity.safeApiClient() = runCatching {
     NetworkClientFactory.create(toDomain(), isDebug = BuildConfig.DEBUG)
@@ -455,6 +517,7 @@ class MessageDetailViewModel @Inject constructor(
     private val applicationDao: ApplicationDao,
     private val serverManager:  ServerManager,
     private val serverDao:      ServerDao,
+    private val notifications:  GotifyNotificationManager,
     savedStateHandle:           SavedStateHandle
 ) : ViewModel() {
 
@@ -496,6 +559,7 @@ class MessageDetailViewModel @Inject constructor(
             _message.value = entity?.toDomain()
             entity?.let {
                 messageDao.markAsRead(serverId, messageId)
+                notifications.cancelNotification(serverId, messageId)
                 _application.value = applicationDao.getApplicationById(serverId, it.appId)?.toDomain()
             }
             _loaded.value = true
@@ -528,11 +592,34 @@ class MessageDetailViewModel @Inject constructor(
 class AppsViewModel @Inject constructor(
     private val serverManager:  ServerManager,
     private val applicationDao: ApplicationDao,
-    private val messageDao:     MessageDao
+    private val messageDao:     MessageDao,
+    private val prefs:          PreferencesRepository,
+    private val notifications:  GotifyNotificationManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AppsUiState())
     val uiState: StateFlow<AppsUiState> = _uiState.asStateFlow()
+
+    /** appId -> muted-until millis for the active server (expired entries excluded). */
+    val mutedUntil: StateFlow<Map<Int, Long>> = combine(
+        prefs.userPreferences,
+        serverManager.activeServer
+    ) { p, server ->
+        val now = System.currentTimeMillis()
+        val prefix = "${server?.id}:"
+        p.appMutes.filter { (k, v) -> k.startsWith(prefix) && v > now }
+            .mapNotNull { (k, v) -> k.removePrefix(prefix).toIntOrNull()?.let { it to v } }
+            .toMap()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    /** untilMillis = null unmutes. */
+    fun setMute(appId: Int, untilMillis: Long?) {
+        val serverId = serverManager.activeServer.value?.id ?: return
+        viewModelScope.launch {
+            prefs.setAppMute(serverId, appId, untilMillis)
+            if (untilMillis != null) notifications.cancelServerNotifications(serverId, appId)
+        }
+    }
 
     val serverBaseUrl: StateFlow<String> = serverManager.activeServer
         .map { it?.baseUrl ?: "" }
@@ -663,6 +750,7 @@ class AppsViewModel @Inject constructor(
             if (result is ApiResult.Success) {
                 applicationDao.deleteApplication(serverId, appId)
                 messageDao.deleteMessagesByApp(serverId, appId)
+                notifications.cancelServerNotifications(serverId, appId)
             } else if (result is ApiResult.Error) _uiState.update { it.copy(errorMessage = result.message) }
         }
     }
@@ -678,6 +766,7 @@ class AppsViewModel @Inject constructor(
             val result = MessageRepository(api).deleteMessagesByApp(appId)
             if (result is ApiResult.Success) {
                 messageDao.deleteMessagesByApp(serverId, appId)
+                notifications.cancelServerNotifications(serverId, appId)
             } else if (result is ApiResult.Error) _uiState.update { it.copy(errorMessage = result.message) }
         }
     }
@@ -702,10 +791,8 @@ class SettingsViewModel @Inject constructor(
     private val serverManager: ServerManager,
     private val serverDao:     ServerDao,
     private val messageDao:    MessageDao,
-    private val applicationDao:ApplicationDao
-
-
-
+    private val applicationDao:ApplicationDao,
+    private val notifications: GotifyNotificationManager
 ) : ViewModel() {
 
     val settingsState: StateFlow<SettingsState> = combine(
@@ -719,6 +806,11 @@ class SettingsViewModel @Inject constructor(
             darkThemeEnabled     = userPrefs.darkThemeEnabled,
             markdownEnabled      = userPrefs.markdownEnabled,
             keepAliveEnabled     = userPrefs.keepAliveEnabled,
+            quietHoursEnabled    = userPrefs.quietHoursEnabled,
+            quietStartMinutes    = userPrefs.quietStartMinutes,
+            quietEndMinutes      = userPrefs.quietEndMinutes,
+            appLockEnabled       = userPrefs.appLockEnabled,
+            serverIntentsEnabled = userPrefs.serverIntentsEnabled,
             serverName           = server?.name ?: "",
             serverUrl            = server?.baseUrl ?: "",
             appVersion           = BuildConfig.VERSION_NAME
@@ -734,6 +826,10 @@ class SettingsViewModel @Inject constructor(
     fun setDarkTheme(v: Boolean)     = viewModelScope.launch { prefs.setDarkThemeEnabled(v) }
     fun setMarkdown(v: Boolean)      = viewModelScope.launch { prefs.setMarkdownEnabled(v) }
     fun setKeepAlive(v: Boolean)     = viewModelScope.launch { prefs.setKeepAliveEnabled(v) }
+    fun setQuietHoursEnabled(v: Boolean) = viewModelScope.launch { prefs.setQuietHoursEnabled(v) }
+    fun setQuietHours(start: Int, end: Int) = viewModelScope.launch { prefs.setQuietHours(start, end) }
+    fun setAppLock(v: Boolean)       = viewModelScope.launch { prefs.setAppLockEnabled(v) }
+    fun setServerIntents(v: Boolean) = viewModelScope.launch { prefs.setServerIntentsEnabled(v) }
 
     
     fun logout(onLoggedOut: () -> Unit) {
@@ -753,6 +849,7 @@ class SettingsViewModel @Inject constructor(
                 serverDao.deleteServer(active.id)
                 messageDao.deleteAllMessages(active.id)
                 applicationDao.deleteAllForServer(active.id)
+                notifications.cancelServerNotifications(active.id)
             }
 
             // Remove inactive servers as well so a future startup cannot
@@ -761,6 +858,7 @@ class SettingsViewModel @Inject constructor(
                 serverDao.deleteServer(server.id)
                 messageDao.deleteAllMessages(server.id)
                 applicationDao.deleteAllForServer(server.id)
+                notifications.cancelServerNotifications(server.id)
             }
 
 
@@ -786,10 +884,12 @@ class AppInboxViewModel @Inject constructor(
     private val applicationDao: ApplicationDao,
     private val serverManager:  ServerManager,
     private val serverDao:      ServerDao,
+    private val notifications:  GotifyNotificationManager,
     savedStateHandle:           SavedStateHandle
 ) : ViewModel() {
 
     private val appId: Int = checkNotNull(savedStateHandle["appId"])
+    private val pendingDeletes = PendingDeletes(viewModelScope) { id -> commitDelete(id) }
     private val requestedServerId: Long = savedStateHandle.get<Long>("serverId") ?: -1L
     private var resolvedServerId: Long = -1L
 
@@ -832,32 +932,40 @@ class AppInboxViewModel @Inject constructor(
 
             pageLimit.flatMapLatest { limit ->
                 messageDao.getMessagesByAppPaged(serverId, appId, limit)
-            }.collect { entities ->
+                    .map { entities -> entities to (entities.size >= limit) }
+            }.combine(pendingDeletes.ids) { (entities, hasMore), hidden ->
+                entities.filterNot { it.id in hidden } to hasMore
+            }.collect { (entities, hasMore) ->
                 _uiState.update {
                     it.copy(
                         messages = entities.map { e -> e.toDomain() },
                         isLoading = false,
-                        hasMorePages = entities.size >= pageLimit.value
+                        hasMorePages = hasMore
                     )
                 }
             }
         }
     }
 
-    fun deleteMessage(messageId: Long) {
+    fun deleteMessage(messageId: Long) = pendingDeletes.schedule(messageId)
+
+    fun undoDelete(messageId: Long) = pendingDeletes.undo(messageId)
+
+    private suspend fun commitDelete(messageId: Long) {
         val serverId = resolvedServerId.takeIf { it > 0 } ?: return
-        viewModelScope.launch {
-            val api = if (serverManager.activeServer.value?.id == serverId) {
-                serverManager.apiClient
-            } else {
-                serverDao.getServerById(serverId)?.safeApiClient()
+        val api = if (serverManager.activeServer.value?.id == serverId) {
+            serverManager.apiClient
+        } else {
+            serverDao.getServerById(serverId)?.safeApiClient()
+        }
+        when (val result = api?.let { MessageRepository(it).deleteMessage(messageId) }) {
+            is ApiResult.Success -> {
+                messageDao.deleteMessage(serverId, messageId)
+                notifications.cancelNotification(serverId, messageId)
             }
-            when (val result = api?.let { MessageRepository(it).deleteMessage(messageId) }) {
-                is ApiResult.Success -> messageDao.deleteMessage(serverId, messageId)
-                is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
-                null -> _uiState.update { it.copy(errorMessage = "No active server connection") }
-                ApiResult.Loading -> Unit
-            }
+            is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
+            null -> _uiState.update { it.copy(errorMessage = "No active server connection") }
+            ApiResult.Loading -> Unit
         }
     }
 
@@ -870,7 +978,10 @@ class AppInboxViewModel @Inject constructor(
                 serverDao.getServerById(serverId)?.safeApiClient()
             }
             when (val result = api?.let { MessageRepository(it).deleteMessagesByApp(appId) }) {
-                is ApiResult.Success -> messageDao.deleteMessagesByApp(serverId, appId)
+                is ApiResult.Success -> {
+                    messageDao.deleteMessagesByApp(serverId, appId)
+                    notifications.cancelServerNotifications(serverId, appId)
+                }
                 is ApiResult.Error -> _uiState.update { it.copy(errorMessage = result.message) }
                 null -> _uiState.update { it.copy(errorMessage = "No active server connection") }
                 ApiResult.Loading -> Unit
@@ -952,16 +1063,26 @@ class SearchViewModel @Inject constructor(
         .map { it?.baseUrl.orEmpty() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
+    private val _filters = MutableStateFlow(SearchFilters())
+    val filters: StateFlow<SearchFilters> = _filters.asStateFlow()
+
     val searchResults: StateFlow<List<GotifyMessage>> = combine(
         _query.debounce(300),
+        _filters,
         serverManager.activeServer.map { it?.id }.distinctUntilChanged()
-    ) { q, serverId -> q to serverId }
-        .flatMapLatest { (q, serverId) ->
-            if (serverId == null) return@flatMapLatest flowOf(emptyList())
-            if (q.isBlank()) flowOf(emptyList())
-            else messageDao.searchMessages(serverId, q.escapeLike()).map { it.map { e -> e.toDomain() } }
+    ) { q, f, serverId -> Triple(q.trim(), f, serverId) }
+        .flatMapLatest { (q, f, serverId) ->
+            if (serverId == null || (q.isEmpty() && !f.isActive)) return@flatMapLatest flowOf(emptyList())
+            val range = f.priority?.range ?: (Int.MIN_VALUE..Int.MAX_VALUE)
+            val since = f.dateRange.windowSeconds?.let { System.currentTimeMillis() / 1000 - it }
+            messageDao.searchMessages(serverId, q.escapeLike(), f.appId, range.first, range.last, since)
+                .map { it.map { e -> e.toDomain() } }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun setPriorityFilter(p: PriorityFilter?) = _filters.update { it.copy(priority = if (it.priority == p) null else p) }
+    fun setAppFilter(appId: Int?)             = _filters.update { it.copy(appId = appId) }
+    fun setDateRange(r: DateRange)            = _filters.update { it.copy(dateRange = if (it.dateRange == r) DateRange.ANY else r) }
 
     val applications: StateFlow<Map<Int, GotifyApplication>> = serverManager.activeServer
         .flatMapLatest { server ->
@@ -992,7 +1113,8 @@ class ServersViewModel @Inject constructor(
     private val prefs:            PreferencesRepository,
     private val webSocketManager: GotifyWebSocketManager,
     private val messageDao:       MessageDao,
-    private val applicationDao:   ApplicationDao
+    private val applicationDao:   ApplicationDao,
+    private val notifications:    GotifyNotificationManager
 ) : ViewModel() {
 
     private val _serverInfo = MutableStateFlow(ServerInfoUiState())
@@ -1071,6 +1193,7 @@ class ServersViewModel @Inject constructor(
             serverDao.deleteServer(serverId)
             messageDao.deleteAllMessages(serverId)
             applicationDao.deleteAllForServer(serverId)
+            notifications.cancelServerNotifications(serverId)
             serverManager.removeServer(serverId)
             if (wasActive) {
                 val next = serverDao.getAllServers().first().firstOrNull()
@@ -1078,6 +1201,26 @@ class ServersViewModel @Inject constructor(
             }
         }
     }
+}
+
+enum class PriorityFilter(val label: String, val range: IntRange) {
+    HIGH("High", 8..Int.MAX_VALUE),
+    NORMAL("Normal", 4..7),
+    LOW("Low", Int.MIN_VALUE..3)
+}
+
+enum class DateRange(val label: String, val windowSeconds: Long?) {
+    ANY("Anytime", null),
+    DAY("24 h", 24 * 3600L),
+    WEEK("7 days", 7 * 24 * 3600L)
+}
+
+data class SearchFilters(
+    val priority: PriorityFilter? = null,
+    val appId: Int? = null,
+    val dateRange: DateRange = DateRange.ANY
+) {
+    val isActive: Boolean get() = priority != null || appId != null || dateRange != DateRange.ANY
 }
 
 data class ServerInfoUiState(
@@ -1089,10 +1232,5 @@ data class ServerInfoUiState(
 )
 
 private fun GotifyApplication.resolvedFor(server: GotifyServer): GotifyApplication = copy(
-    image = when {
-        image.isBlank() -> ""
-        image.startsWith("https://", ignoreCase = true) ||
-            image.startsWith("http://", ignoreCase = true) -> image
-        else -> "${server.baseUrl.trimEnd('/')}/${image.trimStart('/')}"
-    }
+    image = com.gotify.client.ui.apps.resolveAppImageUrl(server.baseUrl, image).orEmpty()
 )

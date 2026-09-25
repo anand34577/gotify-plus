@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.gotify.client.data.datastore.PreferencesRepository
+import com.gotify.client.data.datastore.isInQuietHours
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
 import com.gotify.client.R
@@ -102,12 +103,17 @@ class GotifyNotificationManager @Inject constructor(
         if (message.priority <= 0) return
         val userPrefs = prefs.userPreferences.first()
         if (!userPrefs.notificationsEnabled) return
+        if (userPrefs.isAppMuted(serverId, message.appId)) return
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED) return
 
         val priority  = Priority.fromInt(message.priority)
         val appName   = app?.name ?: "Gotify"
+        val now = java.time.LocalTime.now()
+        // High priority still alerts during quiet hours; everything else arrives silently.
+        val silent = userPrefs.quietHoursEnabled && priority != Priority.HIGH &&
+            isInQuietHours(now.hour * 60 + now.minute, userPrefs.quietStartMinutes, userPrefs.quietEndMinutes)
 
         val channelId = when {
             app == null && priority != Priority.HIGH -> CHANNEL_DEFAULT
@@ -128,6 +134,18 @@ class GotifyNotificationManager @Inject constructor(
             .setGroup("gotify_${serverId}_${app?.id ?: 0}")
             .setPriority(priority.notifCompat)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setSilent(silent)
+            .setWhen(com.gotify.client.ui.components.parseGotifyDate(message.date)?.toEpochMilli()
+                ?: System.currentTimeMillis())
+
+        if (app != null) {
+            val muteIntent = PendingIntent.getBroadcast(
+                context, stableId(serverId, message.id),
+                MuteAppReceiver.intent(context, serverId, app.id, message.id),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(R.drawable.ic_notification, "Mute 1 h", muteIntent)
+        }
 
         if (message.message.length > 80) {
             builder.setStyle(
@@ -168,13 +186,22 @@ class GotifyNotificationManager @Inject constructor(
             .build()
 
     fun cancelNotification(serverId: Long, messageId: Long) = manager.cancel(stableId(serverId, messageId))
-    fun cancelAllNotifications()            = manager.cancelAll()
+
+    /** Clears message notifications for one server (or one app) without touching the service notification. */
+    fun cancelServerNotifications(serverId: Long, appId: Int? = null) {
+        val prefix = if (appId == null) "gotify_${serverId}_" else "gotify_${serverId}_${appId}"
+        manager.activeNotifications
+            .filter { it.notification.group?.let { g -> if (appId == null) g.startsWith(prefix) else g == prefix } == true }
+            .forEach { manager.cancel(it.id) }
+    }
 
     private fun lowChannelId(serverId: Long, appId: Int)        = "${PREFIX}${serverId}_${appId}_low"
     private fun normalChannelId(serverId: Long, appId: Int)     = "${PREFIX}${serverId}_${appId}_normal"
     private fun highVibrateChannelId(serverId: Long, appId: Int)= "${PREFIX}${serverId}_${appId}_high_v"
     private fun highSilentChannelId(serverId: Long, appId: Int) = "${PREFIX}${serverId}_${appId}_high_s"
-    private fun stableId(serverId: Long, messageId: Long): Int = 31 * serverId.hashCode() + messageId.hashCode()
+    private fun stableId(serverId: Long, messageId: Long): Int =
+        (31 * serverId.hashCode() + messageId.hashCode())
+            .let { if (it == NOTIFICATION_ID_FOREGROUND) it + 1 else it }
 
     private fun createChannel(
         id:         String,

@@ -5,4 +5,5 @@
     <string name="notification_channel_default">Gotify notifications</string>
     <string name="notification_channel_high">Gotify high priority</string>
     <string name="service_running">Gotify is connected</string>
+    <string name="widget_description">Unread count and latest message</string>
 </resources>

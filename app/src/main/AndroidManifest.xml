@@ -18,6 +18,9 @@
     <!-- Vibration for high-priority notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- App lock -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
     <!-- Restart after boot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -77,6 +80,30 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
+        </receiver>
+
+        <!-- Periodic catch-up sync when keep-alive is off -->
+        <service
+            android:name=".service.SyncJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- "Mute 1 h" notification action -->
+        <receiver
+            android:name=".notification.MuteAppReceiver"
+            android:exported="false" />
+
+        <!-- Home-screen widget -->
+        <receiver
+            android:name=".widget.UnreadWidgetProvider"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_unread_info" />
         </receiver>
 
     </application>

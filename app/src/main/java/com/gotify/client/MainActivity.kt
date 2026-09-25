@@ -19,7 +19,14 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
+import android.os.CancellationSignal
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.ui.unit.dp
 import com.gotify.client.service.GotifyListenerService
+import com.gotify.client.service.SyncJobService
 import com.gotify.client.ui.login.LoginScreen
 import com.gotify.client.ui.navigation.MainNavHost
 import com.gotify.client.ui.navigation.Routes
@@ -55,11 +62,20 @@ class MainActivity : ComponentActivity() {
             ) { }
 
             LaunchedEffect(appReady, settingsState.serverUrl, settingsState.keepAliveEnabled) {
-                if (appReady && settingsState.serverUrl.isNotBlank() && settingsState.keepAliveEnabled) {
+                if (!appReady) return@LaunchedEffect
+                val loggedIn = settingsState.serverUrl.isNotBlank()
+                if (loggedIn && settingsState.keepAliveEnabled) {
                     GotifyListenerService.start(this@MainActivity)
-                } else if (appReady) {
+                    SyncJobService.cancel(this@MainActivity)
+                } else {
                     GotifyListenerService.stop(this@MainActivity)
+                    if (loggedIn) SyncJobService.schedule(this@MainActivity)
+                    else SyncJobService.cancel(this@MainActivity)
                 }
+            }
+            LaunchedEffect(settingsState.appLockEnabled) {
+                // Keep message content out of the recents thumbnail while locked.
+                if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(!settingsState.appLockEnabled)
             }
             LaunchedEffect(appReady, settingsState.notificationsEnabled, settingsState.serverUrl) {
                 if (appReady && settingsState.serverUrl.isNotBlank() && settingsState.notificationsEnabled && Build.VERSION.SDK_INT >= 33 &&
@@ -82,6 +98,11 @@ class MainActivity : ComponentActivity() {
                         return@Surface
                     }
 
+                    if (settingsState.appLockEnabled && !AppLock.unlocked) {
+                        LockScreen(onUnlock = ::promptUnlock)
+                        return@Surface
+                    }
+
                     AppContent(
                         isLoggedIn        = settingsState.serverUrl.isNotBlank(),
                         deepLinkMessageId = pendingMessageId,
@@ -101,6 +122,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) AppLock.unlocked = false
+    }
+
+    private fun promptUnlock() {
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK or
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        // ponytail: no secure lock screen (or API < 30) means nothing to verify against; don't trap the user.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+            getSystemService(BiometricManager::class.java).canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS
+        ) {
+            AppLock.unlocked = true
+            return
+        }
+        BiometricPrompt.Builder(this)
+            .setTitle("Unlock Gotify+")
+            .setAllowedAuthenticators(authenticators)
+            .build()
+            .authenticate(CancellationSignal(), mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    AppLock.unlocked = true
+                }
+            })
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -115,6 +162,31 @@ class MainActivity : ComponentActivity() {
 
     private fun serverIdFrom(intent: Intent?): Long? =
         intent?.getLongExtra("server_id", -1L)?.takeIf { it >= 0 }
+}
+
+/** Process-wide so rotation doesn't re-lock; cleared when the activity leaves the foreground. */
+object AppLock {
+    var unlocked by mutableStateOf(false)
+}
+
+@Composable
+private fun LockScreen(onUnlock: () -> Unit) {
+    LaunchedEffect(Unit) { onUnlock() }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            Icons.Outlined.Lock, contentDescription = null,
+            modifier = Modifier.size(56.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(16.dp))
+        Text("Gotify+ is locked", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onUnlock) { Text("Unlock") }
+    }
 }
 
 @Composable

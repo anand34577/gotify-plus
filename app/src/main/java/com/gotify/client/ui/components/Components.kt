@@ -28,8 +28,13 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.net.URI
 import java.time.temporal.ChronoUnit
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 // ─── Connection Status Dot ────────────────────────────────────────────────────
 
@@ -189,9 +194,35 @@ fun formatRelativeTime(isoDate: String): String {
     return formatRelativeTime(isoDate, Instant.now())
 }
 
+/** Gotify sends RFC 3339 with the server's offset (e.g. +05:30); Instant.parse only accepts 'Z' before Android 14. */
+fun parseGotifyDate(isoDate: String): Instant? =
+    runCatching { java.time.OffsetDateTime.parse(isoDate).toInstant() }.getOrNull()
+
+/** "Today", "Yesterday", "Monday, Sep 22", or "Sep 22, 2025" for list section headers. */
+fun dayLabel(isoDate: String, today: java.time.LocalDate = java.time.LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+    val date = parseGotifyDate(isoDate)?.atZone(zone)?.toLocalDate() ?: return "Earlier"
+    return when {
+        date == today                -> "Today"
+        date == today.minusDays(1)   -> "Yesterday"
+        date.year == today.year      -> date.format(DateTimeFormatter.ofPattern("EEEE, MMM d"))
+        else                         -> date.format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    }
+}
+
+@Composable
+fun DateHeader(label: String, modifier: Modifier = Modifier) {
+    Text(
+        text       = label,
+        style      = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier   = modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp)
+    )
+}
+
 private fun formatRelativeTime(isoDate: String, now: Instant): String {
     return try {
-        val instant = Instant.parse(isoDate)
+        val instant = parseGotifyDate(isoDate) ?: return isoDate
         val diff    = ChronoUnit.MINUTES.between(instant, now)
         when {
             diff < 1     -> "just now"
@@ -223,82 +254,105 @@ fun MessageCard(
     authBaseUrl: String = "",
     isRead:      Boolean = false
 ) {
-    Card(
-        onClick   = onClick,
-        modifier  = modifier.fillMaxWidth(),
-        shape     = MaterialTheme.shapes.large,
-        colors    = CardDefaults.cardColors(
-            containerColor = if (isRead) {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            }
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+    val swipeState = rememberSwipeToDismissBoxState()
+    val scope = rememberCoroutineScope()
+    SwipeToDismissBox(
+        state                       = swipeState,
+        modifier                    = modifier.semantics {
+            customActions = listOf(CustomAccessibilityAction("Delete message") { onDelete(); true })
+        },
+        enableDismissFromStartToEnd = false,
+        onDismiss                   = {
+            // Snap back; the caller shows a confirm dialog before deleting on the server.
+            onDelete()
+            scope.launch { swipeState.reset() }
+        },
+        backgroundContent           = {
             Box(
                 modifier = Modifier
-                    .width(4.dp)
-                    .heightIn(min = 112.dp)
-                    .background(
-                        priorityColor(priority).copy(alpha = if (isRead) 0.45f else 1f),
-                        MaterialTheme.shapes.extraSmall
-                    )
+                    .fillMaxSize()
+                    .clip(MaterialTheme.shapes.large)
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = Alignment.CenterEnd
             ) {
+                Icon(
+                    Icons.Outlined.DeleteOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
-            Column(modifier = Modifier.padding(16.dp).weight(1f)) {
-                Row(
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    AppIcon(
-                        imageUrl    = appImageUrl,
-                        appName     = appName,
-                        clientToken = clientToken,
-                        authBaseUrl = authBaseUrl,
-                        size        = 36.dp
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
+        }
+    ) {
+        Card(
+            onClick   = onClick,
+            modifier  = Modifier.fillMaxWidth(),
+            shape     = MaterialTheme.shapes.large,
+            colors    = CardDefaults.cardColors(
+                containerColor = if (isRead) MaterialTheme.colorScheme.surfaceContainerLow
+                                 else MaterialTheme.colorScheme.surfaceContainer
+            ),
+            border    = if (isRead) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Row(
+                modifier              = Modifier.padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                AppIcon(
+                    imageUrl    = appImageUrl,
+                    appName     = appName,
+                    clientToken = clientToken,
+                    authBaseUrl = authBaseUrl,
+                    size        = 40.dp
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
                             text       = appName,
                             style      = MaterialTheme.typography.labelLarge,
-                            color      = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
+                            color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines   = 1,
+                            overflow   = TextOverflow.Ellipsis,
+                            modifier   = Modifier.weight(1f, fill = false)
+                        )
+                        Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        RelativeTime(isoDate = date)
+                        Spacer(Modifier.weight(1f))
+                        PriorityBadge(priority = priority)
+                        if (!isRead) {
+                            Box(
+                                Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .semantics { contentDescription = "Unread" }
+                            )
+                        }
+                    }
+                    if (title.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text       = title,
+                            style      = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (isRead) FontWeight.Medium else FontWeight.SemiBold,
+                            color      = MaterialTheme.colorScheme.onSurface,
                             maxLines   = 1,
                             overflow   = TextOverflow.Ellipsis
                         )
-                        RelativeTime(isoDate = date)
                     }
-                    PriorityBadge(priority = priority)
-                }
-                Spacer(Modifier.height(12.dp))
-                if (title.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        text       = title,
-                        style      = MaterialTheme.typography.titleMedium,
-                        fontWeight = if (isRead) FontWeight.Medium else FontWeight.Bold,
-                        color      = MaterialTheme.colorScheme.onSurface,
-                        maxLines   = 2,
-                        overflow   = TextOverflow.Ellipsis
+                        text     = message,
+                        style    = MaterialTheme.typography.bodyMedium,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(4.dp))
                 }
-                Text(
-                    text       = message,
-                    style      = MaterialTheme.typography.bodyMedium,
-                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines   = 3,
-                    overflow   = TextOverflow.Ellipsis,
-                    lineHeight = 20.sp
-                )
-            }
-            IconButton(onClick = onDelete) {
-                Icon(
-                    imageVector        = Icons.Outlined.DeleteOutline,
-                    contentDescription = "Delete message",
-                    tint               = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }
@@ -397,16 +451,16 @@ fun ShimmerBox(modifier: Modifier = Modifier) {
 fun MessageCardSkeleton(modifier: Modifier = Modifier) {
     Card(
         modifier  = modifier.fillMaxWidth(),
-        shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape     = MaterialTheme.shapes.large,
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                ShimmerBox(Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)))
+                ShimmerBox(Modifier.size(40.dp).clip(MaterialTheme.shapes.medium))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     ShimmerBox(Modifier.size(width = 80.dp, height = 10.dp))
                     ShimmerBox(Modifier.size(width = 50.dp, height = 8.dp))
@@ -418,6 +472,34 @@ fun MessageCardSkeleton(modifier: Modifier = Modifier) {
             ShimmerBox(Modifier.fillMaxWidth(0.7f).height(12.dp))
             Spacer(Modifier.height(6.dp))
             ShimmerBox(Modifier.fillMaxWidth(0.5f).height(12.dp))
+        }
+    }
+}
+
+// ─── Undoable delete ─────────────────────────────────────────────────────────
+
+/** Deletes immediately (ViewModel commits after its undo window) and offers Undo in a snackbar. */
+@Composable
+fun rememberUndoableDelete(
+    snackbarHostState: SnackbarHostState,
+    onDelete: (Long) -> Unit,
+    onUndo:   (Long) -> Unit
+): (Long) -> Unit {
+    val scope = rememberCoroutineScope()
+    val currentDelete by rememberUpdatedState(onDelete)
+    val currentUndo by rememberUpdatedState(onUndo)
+    return remember(snackbarHostState) {
+        { id ->
+            currentDelete(id)
+            scope.launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                val result = snackbarHostState.showSnackbar(
+                    message     = "Message deleted",
+                    actionLabel = "Undo",
+                    duration    = SnackbarDuration.Short
+                )
+                if (result == SnackbarResult.ActionPerformed) currentUndo(id)
+            }
         }
     }
 }

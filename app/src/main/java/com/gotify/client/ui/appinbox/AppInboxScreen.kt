@@ -50,6 +50,9 @@ import com.gotify.client.ui.components.EmptyState
 import com.gotify.client.ui.components.MessageCard
 import com.gotify.client.ui.components.MessageCardSkeleton
 import com.gotify.client.ui.components.SectionHeader
+import com.gotify.client.ui.components.DateHeader
+import com.gotify.client.ui.components.dayLabel
+import com.gotify.client.ui.components.rememberUndoableDelete
 import com.gotify.client.ui.apps.AppIconResolved
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,13 +73,15 @@ fun AppInboxScreen(
     onBack: () -> Unit,
     onMessageClick: (GotifyMessage) -> Unit,
     onDeleteMessage: (Long) -> Unit,
+    onUndoDelete: (Long) -> Unit,
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showClearDialog by remember { mutableStateOf(false) }
-    var messagePendingDelete by remember { mutableStateOf<GotifyMessage?>(null) }
     val pullState = rememberPullToRefreshState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val deleteWithUndo = rememberUndoableDelete(snackbarHostState, onDeleteMessage, onUndoDelete)
+    val sections = remember(messages) { messages.groupBy { dayLabel(it.date) } }
 
     LaunchedEffect(errorMessage) {
         errorMessage?.let { snackbarHostState.showSnackbar(it) }
@@ -118,6 +123,7 @@ fun AppInboxScreen(
                         }
                     }
                 },
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -160,20 +166,24 @@ fun AppInboxScreen(
                             modifier = Modifier.padding(bottom = 4.dp)
                         )
                     }
-                    items(messages, key = { it.id }) { message ->
-                        MessageCard(
-                            title = message.title,
-                            message = message.message,
-                            appName = appName,
-                            appImageUrl = appImageUrl,
-                            clientToken = clientToken,
-                            authBaseUrl = serverBaseUrl,
-                            priority = message.priority,
-                            date = message.date,
-                            isRead = message.isRead,
-                            onClick = { onMessageClick(message) },
-                            onDelete = { messagePendingDelete = message }
-                        )
+                    sections.forEach { (label, dayMessages) ->
+                        item(key = "header_$label") { DateHeader(label, Modifier.animateItem()) }
+                        items(dayMessages, key = { it.id }) { message ->
+                            MessageCard(
+                                title = message.title,
+                                message = message.message,
+                                appName = appName,
+                                appImageUrl = appImageUrl,
+                                clientToken = clientToken,
+                                authBaseUrl = serverBaseUrl,
+                                priority = message.priority,
+                                date = message.date,
+                                isRead = message.isRead,
+                                onClick = { onMessageClick(message) },
+                                onDelete = { deleteWithUndo(message.id) },
+                                modifier = Modifier.animateItem()
+                            )
+                        }
                     }
                     if (cacheSyncTruncated) {
                         item {
@@ -220,27 +230,6 @@ fun AppInboxScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    messagePendingDelete?.let { pending ->
-        AlertDialog(
-            onDismissRequest = { messagePendingDelete = null },
-            icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
-            title = { Text("Delete message?") },
-            text = { Text("This permanently removes the message from Gotify and this device.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onDeleteMessage(pending.id)
-                        messagePendingDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { messagePendingDelete = null }) { Text("Cancel") }
             }
         )
     }

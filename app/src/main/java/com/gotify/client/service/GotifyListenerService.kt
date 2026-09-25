@@ -7,14 +7,10 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import com.gotify.client.data.api.GotifyWebSocketManager
-import com.gotify.client.data.db.MessageDao
-import com.gotify.client.data.db.ApplicationDao
 import com.gotify.client.data.db.ServerDao
 import com.gotify.client.data.db.CredentialCipher
-import com.gotify.client.data.db.toEntity
 import com.gotify.client.data.db.toDomain
 import com.gotify.client.data.datastore.PreferencesRepository
-import com.gotify.client.data.model.StreamState
 import com.gotify.client.data.repository.ServerManager
 import com.gotify.client.notification.GotifyNotificationManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -28,16 +24,12 @@ private const val TAG = "GotifyService"
 @AndroidEntryPoint
 class GotifyListenerService : Service() {
 
-    @Inject lateinit var webSocketManager:      GotifyWebSocketManager
-    @Inject lateinit var serverManager:         ServerManager
-    @Inject lateinit var messageDao:            MessageDao
-    @Inject lateinit var applicationDao:        ApplicationDao
+    @Inject lateinit var serverManager:        ServerManager
     @Inject lateinit var notificationManager:   GotifyNotificationManager
     @Inject lateinit var serverDao:              ServerDao
     @Inject lateinit var prefs:                  PreferencesRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var streamJob: Job? = null
     private var serverJob: Job? = null
     private var startupJob: Job? = null
 
@@ -51,16 +43,6 @@ class GotifyListenerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand: ${intent?.action}")
-
-        when (intent?.action) {
-            ACTION_STOP -> {
-                webSocketManager.disconnect()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
-            }
-        }
-
         startAsForeground()
         if (startupJob?.isActive != true) {
             startupJob = scope.launch { initializeAndObserve() }
@@ -73,7 +55,7 @@ class GotifyListenerService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")
-        webSocketManager.disconnect()
+        // Socket is owned by ServerManager; the foreground app keeps using it after keep-alive is turned off.
         scope.cancel()
         super.onDestroy()
     }
@@ -118,24 +100,8 @@ class GotifyListenerService : Service() {
                 return
             }
         }
-        observeWebSocket()
+        // Messages are ingested app-wide (GotifyApplication); this service only keeps the process alive.
         observeActiveServer()
-    }
-
-
-
-    private fun observeWebSocket() {
-        if (streamJob?.isActive == true) return
-        streamJob = scope.launch {
-            webSocketManager.streamState.collect { state ->
-                when (state) {
-                    is StreamState.Message -> handleNewMessage(state.message)
-                    is StreamState.Error   -> Log.w(TAG, "Stream error: ${state.reason}")
-                    is StreamState.Closed  -> Log.d(TAG, "Stream closed: ${state.reason}")
-                    else -> {}
-                }
-            }
-        }
     }
 
     private fun observeActiveServer() {
@@ -154,37 +120,6 @@ class GotifyListenerService : Service() {
 
 
 
-    private suspend fun handleNewMessage(message: com.gotify.client.data.model.GotifyMessage) {
-        val serverId = serverManager.activeServer.value?.id ?: return
-        Log.d(TAG, "New message: id=${message.id} appId=${message.appId} priority=${message.priority}")
-
-
-        val existing = messageDao.getMessageById(serverId, message.id)
-        messageDao.insertMessage(message.toEntity(serverId, existing?.isRead ?: false))
-
-        message.extras?.action?.onReceive?.intentUrl?.takeIf { it.isNotBlank() }?.let { intentUrl ->
-            runCatching { Intent.parseUri(intentUrl, Intent.URI_INTENT_SCHEME) }
-                .onSuccess { sendBroadcast(it) }
-                .onFailure { Log.w(TAG, "Ignoring invalid onReceive intent") }
-        }
-
-
-        val app = applicationDao.getApplicationById(serverId, message.appId)?.toDomain()
-
-
-        if (app != null) notificationManager.createAppChannels(serverId, app)
-
-
-        notificationManager.postMessageNotification(
-            message    = message,
-            app        = app,
-            tapIntent  = buildDetailTapIntent(serverId, message.id),
-            serverId   = serverId
-        )
-    }
-
-
-
     private fun buildTapIntent(): PendingIntent {
         val intent = packageManager
             .getLaunchIntentForPackage(packageName)
@@ -196,30 +131,7 @@ class GotifyListenerService : Service() {
         )
     }
 
-    private fun buildDetailTapIntent(serverId: Long, messageId: Long): PendingIntent {
-
-        val intent = packageManager
-            .getLaunchIntentForPackage(packageName)
-            ?.apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra("message_id", messageId)
-                putExtra("server_id", serverId)
-            }
-            ?: Intent()
-        return PendingIntent.getActivity(
-            this, stableRequestCode(serverId, messageId), intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun stableRequestCode(serverId: Long, messageId: Long): Int =
-        31 * serverId.hashCode() + messageId.hashCode()
-
-
-
     companion object {
-        const val ACTION_STOP = "com.gotify.client.STOP_SERVICE"
-
         fun start(context: Context) {
             val intent = Intent(context, GotifyListenerService::class.java)
             context.startForegroundService(intent)

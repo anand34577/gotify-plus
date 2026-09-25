@@ -13,10 +13,19 @@ import androidx.core.net.toUri
  */
 fun gotifyActionIntent(rawAction: String): Intent {
     return runCatching {
-        Intent.parseUri(rawAction, Intent.URI_INTENT_SCHEME)
+        Intent.parseUri(rawAction, Intent.URI_INTENT_SCHEME).sanitized()
     }.getOrElse {
         Intent(Intent.ACTION_VIEW, rawAction.toUri())
     }
+}
+
+/** Payloads come from the server: never let them carry URI grants or a hidden selector. */
+fun Intent.sanitized(): Intent = apply {
+    selector = null
+    flags = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or
+        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION).inv()
 }
 
 fun Context.launchGotifyAction(rawAction: String): Boolean {

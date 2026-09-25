@@ -24,8 +24,27 @@ data class UserPreferences(
     val markdownEnabled: Boolean      = true,
     val keepAliveEnabled: Boolean     = true,
     val activeServerId: Long          = -1L,
-    val lastSyncTimestamp: Long       = 0L
-)
+    val lastSyncTimestamp: Long       = 0L,
+    val quietHoursEnabled: Boolean    = false,
+    val quietStartMinutes: Int        = 22 * 60,
+    val quietEndMinutes: Int          = 7 * 60,
+    val appLockEnabled: Boolean       = false,
+    val serverIntentsEnabled: Boolean = false,
+    // "serverId:appId" -> muted-until epoch millis (Long.MAX_VALUE = muted indefinitely)
+    val appMutes: Map<String, Long>   = emptyMap()
+) {
+    fun isAppMuted(serverId: Long, appId: Int, now: Long = System.currentTimeMillis()): Boolean =
+        (appMutes[muteKey(serverId, appId)] ?: 0L) > now
+}
+
+fun muteKey(serverId: Long, appId: Int) = "$serverId:$appId"
+
+/** Quiet window may wrap past midnight (e.g. 22:00 → 07:00). start == end means disabled. */
+fun isInQuietHours(nowMinutes: Int, startMinutes: Int, endMinutes: Int): Boolean = when {
+    startMinutes == endMinutes -> false
+    startMinutes < endMinutes  -> nowMinutes in startMinutes until endMinutes
+    else                       -> nowMinutes >= startMinutes || nowMinutes < endMinutes
+}
 
 @Singleton
 class PreferencesRepository @Inject constructor(
@@ -42,6 +61,12 @@ class PreferencesRepository @Inject constructor(
         val KEEP_ALIVE_ENABLED     = booleanPreferencesKey("keep_alive_enabled")
         val ACTIVE_SERVER_ID       = longPreferencesKey("active_server_id")
         val LAST_SYNC_TIMESTAMP    = longPreferencesKey("last_sync_timestamp")
+        val QUIET_HOURS_ENABLED    = booleanPreferencesKey("quiet_hours_enabled")
+        val QUIET_START            = intPreferencesKey("quiet_start_minutes")
+        val QUIET_END              = intPreferencesKey("quiet_end_minutes")
+        val APP_LOCK_ENABLED       = booleanPreferencesKey("app_lock_enabled")
+        val SERVER_INTENTS_ENABLED = booleanPreferencesKey("server_intents_enabled")
+        val APP_MUTES              = stringSetPreferencesKey("app_mutes")
     }
 
 
@@ -60,9 +85,47 @@ class PreferencesRepository @Inject constructor(
                 markdownEnabled      = prefs[Keys.MARKDOWN_ENABLED]      ?: true,
                 keepAliveEnabled     = prefs[Keys.KEEP_ALIVE_ENABLED]    ?: true,
                 activeServerId       = prefs[Keys.ACTIVE_SERVER_ID]      ?: -1L,
-                lastSyncTimestamp    = prefs[Keys.LAST_SYNC_TIMESTAMP]   ?: 0L
+                lastSyncTimestamp    = prefs[Keys.LAST_SYNC_TIMESTAMP]   ?: 0L,
+                quietHoursEnabled    = prefs[Keys.QUIET_HOURS_ENABLED]   ?: false,
+                quietStartMinutes    = prefs[Keys.QUIET_START]           ?: (22 * 60),
+                quietEndMinutes      = prefs[Keys.QUIET_END]             ?: (7 * 60),
+                appLockEnabled       = prefs[Keys.APP_LOCK_ENABLED]      ?: false,
+                serverIntentsEnabled = prefs[Keys.SERVER_INTENTS_ENABLED] ?: false,
+                appMutes             = parseMutes(prefs[Keys.APP_MUTES])
             )
         }
+
+    private fun parseMutes(raw: Set<String>?): Map<String, Long> =
+        raw.orEmpty().mapNotNull { entry ->
+            val key = entry.substringBeforeLast(':', "")
+            val until = entry.substringAfterLast(':').toLongOrNull()
+            if (key.isEmpty() || until == null) null else key to until
+        }.toMap()
+
+    /** untilMillis = null unmutes; Long.MAX_VALUE mutes until turned off. Expired entries are dropped. */
+    suspend fun setAppMute(serverId: Long, appId: Int, untilMillis: Long?) =
+        context.dataStore.edit { prefs ->
+            val now = System.currentTimeMillis()
+            val mutes = parseMutes(prefs[Keys.APP_MUTES]).filterValues { it > now }.toMutableMap()
+            if (untilMillis == null) mutes.remove(muteKey(serverId, appId))
+            else mutes[muteKey(serverId, appId)] = untilMillis
+            prefs[Keys.APP_MUTES] = mutes.map { (k, v) -> "$k:$v" }.toSet()
+        }
+
+    suspend fun setQuietHoursEnabled(enabled: Boolean) =
+        context.dataStore.edit { it[Keys.QUIET_HOURS_ENABLED] = enabled }
+
+    suspend fun setQuietHours(startMinutes: Int, endMinutes: Int) =
+        context.dataStore.edit {
+            it[Keys.QUIET_START] = startMinutes
+            it[Keys.QUIET_END] = endMinutes
+        }
+
+    suspend fun setAppLockEnabled(enabled: Boolean) =
+        context.dataStore.edit { it[Keys.APP_LOCK_ENABLED] = enabled }
+
+    suspend fun setServerIntentsEnabled(enabled: Boolean) =
+        context.dataStore.edit { it[Keys.SERVER_INTENTS_ENABLED] = enabled }
 
 
 
