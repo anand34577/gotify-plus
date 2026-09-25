@@ -117,6 +117,7 @@ fun MessageDetailScreen(
                         )
                     }
                 },
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -420,7 +421,10 @@ private fun DetailMetadataCard(message: GotifyMessage) {
                     MetaRow("Message ID",  "#${message.id}")
                     MetaRow("App ID",      "#${message.appId}")
                     MetaRow("Priority",    "${message.priority}")
-                    MetaRow("Timestamp",   message.date)
+                    MetaRow("Timestamp", parseGotifyDate(message.date)
+                        ?.atZone(java.time.ZoneId.systemDefault())
+                        ?.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy · HH:mm:ss"))
+                        ?: message.date)
                     if (message.extras != null) {
                         MetaRow("Content type",
                             message.extras.display?.contentType ?: "text/plain")

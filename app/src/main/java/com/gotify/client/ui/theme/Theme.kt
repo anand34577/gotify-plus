@@ -37,7 +37,7 @@ val AccentPurple      = Color(0xFFD7A8FF)
 
 private val DarkColorScheme = darkColorScheme(
     primary            = GotifyBlue,
-    onPrimary          = Color.White,
+    onPrimary          = Color(0xFF00325A),
     primaryContainer   = Color(0xFF123B5D),
     onPrimaryContainer = GotifyBlueLight,
 
@@ -61,6 +61,14 @@ private val DarkColorScheme = darkColorScheme(
     outline            = SurfaceBorder,
     outlineVariant     = Color(0xFF21262D),
 
+    surfaceDim              = SurfaceDark,
+    surfaceBright           = Color(0xFF26344D),
+    surfaceContainerLowest  = Color(0xFF080E1A),
+    surfaceContainerLow     = Color(0xFF0F1726),
+    surfaceContainer        = SurfaceDark2,
+    surfaceContainerHigh    = Color(0xFF1A2438),
+    surfaceContainerHighest = Color(0xFF213049),
+
     error              = AccentRed,
     onError            = Color.White,
     errorContainer     = Color(0xFF3D1A1A),
@@ -77,8 +85,11 @@ private val LightColorScheme = lightColorScheme(
 
     secondary          = Color(0xFF57606A),
     onSecondary        = Color.White,
-    secondaryContainer = Color(0xFFF6F8FA),
-    onSecondaryContainer = Color(0xFF24292F),
+    secondaryContainer = Color(0xFFDCE7F5),
+    onSecondaryContainer = Color(0xFF0F2A47),
+
+    tertiary           = Color(0xFF7A4FB0),
+    onTertiary         = Color.White,
 
     background         = Color(0xFFF5F7FB),
     onBackground       = Color(0xFF24292F),
@@ -89,6 +100,15 @@ private val LightColorScheme = lightColorScheme(
     onSurfaceVariant   = Color(0xFF57606A),
 
     outline            = Color(0xFFD0D7DE),
+    outlineVariant     = Color(0xFFE3E8EF),
+
+    surfaceDim              = Color(0xFFDCE2EB),
+    surfaceBright           = Color.White,
+    surfaceContainerLowest  = Color.White,
+    surfaceContainerLow     = Color(0xFFF9FBFE),
+    surfaceContainer        = Color.White,
+    surfaceContainerHigh    = Color(0xFFEDF1F7),
+    surfaceContainerHighest = Color(0xFFE4E9F1),
 )
 
 
@@ -145,22 +165,4 @@ fun GotifyTheme(
         shapes      = GotifyShapes,
         content     = content
     )
-}
-
-
-
-@Composable
-fun priorityColor(priority: Int): Color = when {
-    priority == 0    -> MaterialTheme.colorScheme.outlineVariant
-    priority <= 3    -> MaterialTheme.colorScheme.onSurfaceVariant
-    priority <= 7    -> AccentOrange
-    else             -> AccentRed
-}
-
-@Composable
-fun priorityLabel(priority: Int): String = when {
-    priority == 0    -> "Silent"
-    priority <= 3    -> "Low"
-    priority <= 7    -> "Normal"
-    else             -> "High"
 }

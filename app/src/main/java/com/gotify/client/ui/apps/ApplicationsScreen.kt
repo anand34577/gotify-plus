@@ -22,8 +22,14 @@ import java.net.URI
 
 
 
+// Gotify returns "static/defaultapp.jpg" (its own logo) for apps with no custom
+// icon uploaded — treat it as "no image" so the initials avatar shows instead.
+// Matches relative, absolute and sub-path forms (e.g. https://host/gotify/static/defaultapp.jpg).
+private const val GOTIFY_DEFAULT_APP_IMAGE = "static/defaultapp.jpg"
+
 fun resolveAppImageUrl(baseUrl: String, relativePath: String): String? {
     if (baseUrl.isBlank() || relativePath.isBlank()) return null
+    if (relativePath.substringBefore('?').endsWith(GOTIFY_DEFAULT_APP_IMAGE, ignoreCase = true)) return null
     val candidate = if (relativePath.startsWith("https://", ignoreCase = true) ||
         relativePath.startsWith("http://", ignoreCase = true)
     ) {
@@ -41,6 +47,13 @@ fun resolveAppImageUrl(baseUrl: String, relativePath: String): String? {
 
 
 
+
+private fun muteLabel(untilMillis: Long): String {
+    if (untilMillis == Long.MAX_VALUE) return "Muted"
+    val until = java.time.Instant.ofEpochMilli(untilMillis).atZone(java.time.ZoneId.systemDefault())
+    val pattern = if (until.toLocalDate() == java.time.LocalDate.now()) "HH:mm" else "EEE HH:mm"
+    return "Muted until " + until.format(java.time.format.DateTimeFormatter.ofPattern(pattern))
+}
 
 @Composable
 fun AppIconResolved(
@@ -68,6 +81,8 @@ fun AppIconResolved(
 fun ApplicationsScreen(
     applications: List<GotifyApplication>,
     messageCounts: Map<Int, Int>,
+    mutedUntil: Map<Int, Long>,
+    onMuteApp: (appId: Int, untilMillis: Long?) -> Unit,
     serverBaseUrl: String,
     isLoading: Boolean,
     clientToken: String,
@@ -100,6 +115,7 @@ fun ApplicationsScreen(
                         Icon(Icons.Outlined.Refresh, "Refresh")
                     }
                 },
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -179,6 +195,8 @@ fun ApplicationsScreen(
                             clientToken      = clientToken,
                             authBaseUrl      = serverBaseUrl,
                             messageCount     = messageCounts[app.id] ?: 0,
+                            mutedUntil       = mutedUntil[app.id],
+                            onMute           = { until -> onMuteApp(app.id, until) },
                             onClick          = { onAppClick(app) },
                             onDelete         = { onDeleteApp(app.id) },
                             onClearMessages  = { onDeleteAppMessages(app.id) },
@@ -211,9 +229,11 @@ private fun ApplicationCard(
     clientToken: String,
     authBaseUrl: String,
     messageCount:     Int,
+    mutedUntil:       Long?,
     onClick:          () -> Unit,
     onDelete:         () -> Unit,
     onClearMessages:  () -> Unit,
+    onMute:           (untilMillis: Long?) -> Unit,
     onEdit:           (name: String, description: String) -> Unit,
     modifier:         Modifier = Modifier
 ) {
@@ -221,12 +241,14 @@ private fun ApplicationCard(
     var showConfirm by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var showEditSheet by remember { mutableStateOf(false) }
+    var showMuteDialog by remember { mutableStateOf(false) }
+    val isMuted = mutedUntil != null && mutedUntil > System.currentTimeMillis()
 
     Card(
         onClick   = onClick,
         modifier  = modifier.fillMaxWidth(),
-        shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape     = MaterialTheme.shapes.large,
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         elevation = CardDefaults.cardElevation(0.dp),
         border    = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
@@ -318,6 +340,23 @@ private fun ApplicationCard(
                             )
                         }
                     }
+                    if (isMuted) {
+                        Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(Icons.Outlined.NotificationsOff, null, Modifier.size(12.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    muteLabel(mutedUntil!!),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -337,6 +376,19 @@ private fun ApplicationCard(
                             text        = { Text("Edit application") },
                             leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                             onClick     = { showEditSheet = true; showMenu = false }
+                        )
+                    }
+                    if (isMuted) {
+                        DropdownMenuItem(
+                            text        = { Text("Unmute notifications") },
+                            leadingIcon = { Icon(Icons.Outlined.Notifications, null) },
+                            onClick     = { onMute(null); showMenu = false }
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text        = { Text("Mute notifications…") },
+                            leadingIcon = { Icon(Icons.Outlined.NotificationsOff, null) },
+                            onClick     = { showMuteDialog = true; showMenu = false }
                         )
                     }
                     DropdownMenuItem(
@@ -369,6 +421,37 @@ private fun ApplicationCard(
                 ) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showMuteDialog) {
+        val hour = 60 * 60 * 1000L
+        val options = listOf(
+            "1 hour" to hour,
+            "8 hours" to 8 * hour,
+            "24 hours" to 24 * hour,
+            "Until I turn it back on" to null
+        )
+        AlertDialog(
+            onDismissRequest = { showMuteDialog = false },
+            icon  = { Icon(Icons.Outlined.NotificationsOff, null) },
+            title = { Text("Mute ${application.name}") },
+            text  = {
+                Column {
+                    options.forEach { (label, duration) ->
+                        ListItem(
+                            headlineContent = { Text(label) },
+                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                            modifier = Modifier.clickable {
+                                onMute(duration?.let { System.currentTimeMillis() + it } ?: Long.MAX_VALUE)
+                                showMuteDialog = false
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showMuteDialog = false }) { Text("Cancel") } }
         )
     }
 

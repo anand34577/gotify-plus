@@ -21,6 +21,20 @@ android {
         versionName   = "1.0.0"
     }
 
+    // Release signing comes from env vars set by CI (see .github/workflows/release.yml).
+    // Absent locally -> release builds stay unsigned, same as before.
+    val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    signingConfigs {
+        if (keystorePath != null) {
+            create("release") {
+                storeFile     = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias      = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword   = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isDebuggable   = true
@@ -34,6 +48,9 @@ android {
                 "proguard-rules.pro"
             )
             buildConfigField("Boolean", "IS_DEBUG", "false")
+            if (keystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

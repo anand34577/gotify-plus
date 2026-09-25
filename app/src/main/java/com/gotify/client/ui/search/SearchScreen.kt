@@ -24,6 +24,11 @@ import androidx.compose.ui.unit.dp
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
 import com.gotify.client.ui.components.*
+import com.gotify.client.ui.viewmodel.DateRange
+import com.gotify.client.ui.viewmodel.PriorityFilter
+import com.gotify.client.ui.viewmodel.SearchFilters
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +38,10 @@ fun SearchScreen(
     applications: Map<Int, GotifyApplication>,
     clientToken: String,
     serverBaseUrl: String,
+    filters: SearchFilters,
+    onPriorityFilter: (PriorityFilter) -> Unit,
+    onAppFilter: (Int?) -> Unit,
+    onDateRange: (DateRange) -> Unit,
     onQueryChange: (String) -> Unit,
     onClearQuery: () -> Unit,
     onBack: () -> Unit,
@@ -81,6 +90,7 @@ fun SearchScreen(
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
                     }
                 },
+                expandedHeight = 56.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -89,19 +99,27 @@ fun SearchScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
 
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            SearchFilterRow(
+                filters          = filters,
+                applications     = applications,
+                onPriorityFilter = onPriorityFilter,
+                onAppFilter      = onAppFilter,
+                onDateRange      = onDateRange
+            )
+          Box(Modifier.weight(1f)) {
             when {
 
-                query.isBlank() -> {
+                query.isBlank() && !filters.isActive -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         EmptyState(
                             icon     = Icons.Outlined.Search,
                             title    = "Search messages",
-                            subtitle = "Search by title or message content"
+                            subtitle = "Search by text, or pick a filter above"
                         )
                     }
                 }
@@ -111,8 +129,8 @@ fun SearchScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         EmptyState(
                             icon     = Icons.Outlined.SearchOff,
-                            title    = "No results for \"$query\"",
-                            subtitle = "Try a different search term"
+                            title    = if (query.isBlank()) "No matching messages" else "No results for \"$query\"",
+                            subtitle = "Try a different search term or filter"
                         )
                     }
                 }
@@ -146,6 +164,54 @@ fun SearchScreen(
                     }
                 }
             }
+          }
+        }
+    }
+}
+
+@Composable
+private fun SearchFilterRow(
+    filters: SearchFilters,
+    applications: Map<Int, GotifyApplication>,
+    onPriorityFilter: (PriorityFilter) -> Unit,
+    onAppFilter: (Int?) -> Unit,
+    onDateRange: (DateRange) -> Unit
+) {
+    var appMenuOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box {
+            FilterChip(
+                selected    = filters.appId != null,
+                onClick     = { appMenuOpen = true },
+                label       = { Text(filters.appId?.let { applications[it]?.name } ?: "Any app") },
+                trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null, Modifier.size(18.dp)) }
+            )
+            DropdownMenu(expanded = appMenuOpen, onDismissRequest = { appMenuOpen = false }) {
+                DropdownMenuItem(text = { Text("Any app") }, onClick = { onAppFilter(null); appMenuOpen = false })
+                applications.values.sortedBy { it.name.lowercase() }.forEach { app ->
+                    DropdownMenuItem(text = { Text(app.name) }, onClick = { onAppFilter(app.id); appMenuOpen = false })
+                }
+            }
+        }
+        PriorityFilter.entries.forEach { p ->
+            FilterChip(
+                selected = filters.priority == p,
+                onClick  = { onPriorityFilter(p) },
+                label    = { Text(p.label) }
+            )
+        }
+        listOf(DateRange.DAY, DateRange.WEEK).forEach { r ->
+            FilterChip(
+                selected = filters.dateRange == r,
+                onClick  = { onDateRange(r) },
+                label    = { Text(r.label) }
+            )
         }
     }
 }
@@ -167,8 +233,8 @@ private fun SearchResultCard(
     Card(
         onClick   = onClick,
         modifier  = modifier.fillMaxWidth(),
-        shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape     = MaterialTheme.shapes.large,
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {

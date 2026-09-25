@@ -108,6 +108,7 @@ fun MainNavHost(
                 val serverName  by vm.activeServerName.collectAsStateWithLifecycle()
                 val clientToken by vm.clientToken.collectAsStateWithLifecycle()
                 val serverBaseUrl by vm.serverBaseUrl.collectAsStateWithLifecycle()
+                val filter      by vm.filter.collectAsStateWithLifecycle()
 
                 HomeScreen(
                     messages            = uiState.messages,
@@ -123,10 +124,15 @@ fun MainNavHost(
                     isRefreshing        = uiState.isRefreshing,
                     hasMorePages        = uiState.hasMorePages,
                     errorMessage        = uiState.errorMessage,
+                    selectedAppId       = filter.appId,
+                    unreadOnly          = filter.unreadOnly,
+                    onSelectApp         = vm::selectApp,
+                    onToggleUnread      = vm::toggleUnreadOnly,
                     onRefresh           = vm::refresh,
                     onLoadMore          = vm::loadMore,
                     onMessageClick      = { navController.navigate(Routes.detail(it.id)) },
                     onDeleteMessage     = vm::deleteMessage,
+                    onUndoDelete        = vm::undoDelete,
                     onDeleteAllMessages = vm::deleteAllMessages,
                     onMarkAllAsRead     = vm::markAllAsRead,
                     onOpenServers       = { showServerSheet = true },
@@ -139,10 +145,13 @@ fun MainNavHost(
                 val uiState      by vm.uiState.collectAsStateWithLifecycle()
                 val serverBaseUrl by vm.serverBaseUrl.collectAsStateWithLifecycle()
                 val clientToken  by vm.clientToken.collectAsStateWithLifecycle()
+                val mutedUntil   by vm.mutedUntil.collectAsStateWithLifecycle()
 
                 ApplicationsScreen(
                     applications        = uiState.applications,
                     messageCounts       = uiState.messageCounts,
+                    mutedUntil          = mutedUntil,
+                    onMuteApp           = vm::setMute,
                     serverBaseUrl       = serverBaseUrl,
                     clientToken         = clientToken,
                     isLoading           = uiState.isLoading,
@@ -170,6 +179,13 @@ fun MainNavHost(
                     onToggleDarkTheme     = vm::setDarkTheme,
                     onToggleMarkdown      = vm::setMarkdown,
                     onToggleKeepAlive     = vm::setKeepAlive,
+                    onToggleQuietHours    = vm::setQuietHoursEnabled,
+                    onSetQuietHours       = vm::setQuietHours,
+                    onToggleAppLock       = { enabled ->
+                        com.gotify.client.AppLock.unlocked = true // don't lock the user out mid-setting
+                        vm.setAppLock(enabled)
+                    },
+                    onToggleServerIntents = vm::setServerIntents,
                     onLogout              = {
                         vm.logout {
                             navController.navigate(Routes.HOME) {
@@ -260,6 +276,7 @@ fun MainNavHost(
                         navController.navigate(Routes.detail(it.id, inboxServerId))
                     },
                     onDeleteMessage = vm::deleteMessage,
+                    onUndoDelete    = vm::undoDelete,
                     onClearAll      = vm::clearAllMessages
                 )
             }
@@ -271,6 +288,7 @@ fun MainNavHost(
                 val apps    by vm.applications.collectAsStateWithLifecycle()
                 val clientToken by vm.clientToken.collectAsStateWithLifecycle()
                 val serverBaseUrl by vm.serverBaseUrl.collectAsStateWithLifecycle()
+                val filters by vm.filters.collectAsStateWithLifecycle()
 
                 SearchScreen(
                     query          = query,
@@ -278,6 +296,10 @@ fun MainNavHost(
                     applications   = apps,
                     clientToken    = clientToken,
                     serverBaseUrl  = serverBaseUrl,
+                    filters        = filters,
+                    onPriorityFilter = vm::setPriorityFilter,
+                    onAppFilter    = vm::setAppFilter,
+                    onDateRange    = vm::setDateRange,
                     onQueryChange  = vm::setQuery,
                     onClearQuery   = vm::clearQuery,
                     onBack         = { navController.popBackStack() },
