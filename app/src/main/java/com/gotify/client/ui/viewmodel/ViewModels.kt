@@ -115,7 +115,7 @@ class LoginViewModel @Inject constructor(
                 is ApiResult.Success -> {
                     val client = authResult.data
                     try {
-                        saveAndActivate(GotifyServer(name = serverName.ifBlank { trimmedUrl }, baseUrl = trimmedUrl, clientToken = client.token, isActive = true), clientId = client.id)
+                        saveAndActivate(GotifyServer(name = serverName.ifBlank { trimmedUrl.substringAfter("://") }, baseUrl = trimmedUrl, clientToken = client.token, isActive = true), clientId = client.id)
                         _uiState.update { it.copy(isLoading = false, loginSuccess = true) }
                     } catch (e: CancellationException) {
                         throw e
@@ -143,7 +143,7 @@ class LoginViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = false, errorMessage = "Enter a valid HTTPS server URL") }
                 return@launch
             }
-            val server = GotifyServer(name = serverName.ifBlank { trimmedUrl }, baseUrl = trimmedUrl, clientToken = trimmedToken, isActive = true)
+            val server = GotifyServer(name = serverName.ifBlank { trimmedUrl.substringAfter("://") }, baseUrl = trimmedUrl, clientToken = trimmedToken, isActive = true)
             when (val result = safeApiCall { NetworkClientFactory.create(server).messages.getMessages(limit = 1) }) {
                 is ApiResult.Success -> try {
                     saveAndActivate(server, 0)
@@ -803,7 +803,7 @@ class SettingsViewModel @Inject constructor(
             notificationsEnabled = userPrefs.notificationsEnabled,
             vibrationEnabled     = userPrefs.vibrationEnabled,
             dynamicColorEnabled  = userPrefs.dynamicColorEnabled,
-            darkThemeEnabled     = userPrefs.darkThemeEnabled,
+            themeMode            = userPrefs.themeMode,
             markdownEnabled      = userPrefs.markdownEnabled,
             keepAliveEnabled     = userPrefs.keepAliveEnabled,
             quietHoursEnabled    = userPrefs.quietHoursEnabled,
@@ -823,7 +823,7 @@ class SettingsViewModel @Inject constructor(
     fun setNotifications(v: Boolean) = viewModelScope.launch { prefs.setNotificationsEnabled(v) }
     fun setVibration(v: Boolean)     = viewModelScope.launch { prefs.setVibrationEnabled(v) }
     fun setDynamicColor(v: Boolean)  = viewModelScope.launch { prefs.setDynamicColorEnabled(v) }
-    fun setDarkTheme(v: Boolean)     = viewModelScope.launch { prefs.setDarkThemeEnabled(v) }
+    fun setThemeMode(mode: com.gotify.client.data.datastore.ThemeMode) = viewModelScope.launch { prefs.setThemeMode(mode) }
     fun setMarkdown(v: Boolean)      = viewModelScope.launch { prefs.setMarkdownEnabled(v) }
     fun setKeepAlive(v: Boolean)     = viewModelScope.launch { prefs.setKeepAliveEnabled(v) }
     fun setQuietHoursEnabled(v: Boolean) = viewModelScope.launch { prefs.setQuietHoursEnabled(v) }
@@ -1211,7 +1211,7 @@ enum class PriorityFilter(val label: String, val range: IntRange) {
 
 enum class DateRange(val label: String, val windowSeconds: Long?) {
     ANY("Anytime", null),
-    DAY("24 h", 24 * 3600L),
+    DAY("24 hours", 24 * 3600L),
     WEEK("7 days", 7 * 24 * 3600L)
 }
 

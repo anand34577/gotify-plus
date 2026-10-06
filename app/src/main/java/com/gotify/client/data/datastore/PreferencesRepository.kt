@@ -19,7 +19,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class UserPreferences(
     val notificationsEnabled: Boolean = true,
     val vibrationEnabled: Boolean     = true,
-    val darkThemeEnabled: Boolean     = true,
+    val themeMode: ThemeMode          = ThemeMode.SYSTEM,
     val dynamicColorEnabled: Boolean  = false,
     val markdownEnabled: Boolean      = true,
     val keepAliveEnabled: Boolean     = true,
@@ -36,6 +36,8 @@ data class UserPreferences(
     fun isAppMuted(serverId: Long, appId: Int, now: Long = System.currentTimeMillis()): Boolean =
         (appMutes[muteKey(serverId, appId)] ?: 0L) > now
 }
+
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 fun muteKey(serverId: Long, appId: Int) = "$serverId:$appId"
 
@@ -55,7 +57,9 @@ class PreferencesRepository @Inject constructor(
     private object Keys {
         val NOTIFICATIONS_ENABLED  = booleanPreferencesKey("notifications_enabled")
         val VIBRATION_ENABLED      = booleanPreferencesKey("vibration_enabled")
+        // Legacy on/off switch; only read as a fallback when THEME_MODE was never written.
         val DARK_THEME_ENABLED     = booleanPreferencesKey("dark_theme_enabled")
+        val THEME_MODE             = stringPreferencesKey("theme_mode")
         val DYNAMIC_COLOR_ENABLED  = booleanPreferencesKey("dynamic_color_enabled")
         val MARKDOWN_ENABLED       = booleanPreferencesKey("markdown_enabled")
         val KEEP_ALIVE_ENABLED     = booleanPreferencesKey("keep_alive_enabled")
@@ -80,7 +84,9 @@ class PreferencesRepository @Inject constructor(
             UserPreferences(
                 notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: true,
                 vibrationEnabled     = prefs[Keys.VIBRATION_ENABLED]     ?: true,
-                darkThemeEnabled     = prefs[Keys.DARK_THEME_ENABLED]    ?: true,
+                themeMode            = prefs[Keys.THEME_MODE]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
+                    ?: prefs[Keys.DARK_THEME_ENABLED]?.let { if (it) ThemeMode.DARK else ThemeMode.LIGHT }
+                    ?: ThemeMode.SYSTEM,
                 dynamicColorEnabled  = prefs[Keys.DYNAMIC_COLOR_ENABLED] ?: false,
                 markdownEnabled      = prefs[Keys.MARKDOWN_ENABLED]      ?: true,
                 keepAliveEnabled     = prefs[Keys.KEEP_ALIVE_ENABLED]    ?: true,
@@ -135,8 +141,8 @@ class PreferencesRepository @Inject constructor(
     suspend fun setVibrationEnabled(enabled: Boolean) =
         context.dataStore.edit { it[Keys.VIBRATION_ENABLED] = enabled }
 
-    suspend fun setDarkThemeEnabled(enabled: Boolean) =
-        context.dataStore.edit { it[Keys.DARK_THEME_ENABLED] = enabled }
+    suspend fun setThemeMode(mode: ThemeMode) =
+        context.dataStore.edit { it[Keys.THEME_MODE] = mode.name }
 
     suspend fun setDynamicColorEnabled(enabled: Boolean) =
         context.dataStore.edit { it[Keys.DYNAMIC_COLOR_ENABLED] = enabled }

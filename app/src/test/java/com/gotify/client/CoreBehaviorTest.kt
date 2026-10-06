@@ -10,6 +10,7 @@ import com.gotify.client.data.datastore.isInQuietHours
 import com.gotify.client.data.datastore.muteKey
 import com.gotify.client.ui.components.dayLabel
 import com.gotify.client.ui.components.parseGotifyDate
+import com.gotify.client.ui.components.previewText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -118,5 +119,14 @@ class CoreBehaviorTest {
                 "https://example.test"
             )
         )
+    }
+
+    @Test
+    fun listPreviewDropsMarkdownSyntax() {
+        assertEquals(
+            "Backup vzdump done • 6 OK see logs",
+            previewText("# Backup\n**vzdump** done\n\n- 6 OK\n[see logs](https://example.test/logs)")
+        )
+        assertEquals("plain_file_name.txt changed", previewText("plain_file_name.txt changed"))
     }
 }

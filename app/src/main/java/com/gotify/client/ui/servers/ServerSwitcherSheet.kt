@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.*
 import com.gotify.client.data.model.GotifyServer
 import com.gotify.client.ui.components.ConnectionDot
 import com.gotify.client.ui.components.ConnectionStatus
+import com.gotify.client.ui.components.SectionHeader
 import com.gotify.client.ui.viewmodel.ServerInfoUiState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,73 +36,29 @@ fun ServerSwitcherSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // Many saved servers must stay reachable on short screens.
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Server control",
+                "Servers",
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 4.dp)
+                fontWeight = FontWeight.Bold
             )
 
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ConnectionDot(connectionStatus)
-                        Text(
-                            when (connectionStatus) {
-                                ConnectionStatus.CONNECTED -> "Stream is live"
-                                ConnectionStatus.CONNECTING -> "Connecting…"
-                                ConnectionStatus.ERROR -> "Connection needs attention"
-                                ConnectionStatus.DISCONNECTED -> "Stream is offline"
-                            },
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                    if (serverInfo.version != null || serverInfo.health != null) {
-                        Text(
-                            buildString {
-                                serverInfo.version?.let { append("Gotify $it") }
-                                serverInfo.health?.let {
-                                    if (isNotEmpty()) append("  ·  ")
-                                    append("Health: $it")
-                                }
-                                serverInfo.database?.let {
-                                    if (isNotEmpty()) append("  ·  DB: $it")
-                                }
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
-                        )
-                    } else if (serverInfo.errorMessage != null) {
-                        Text(
-                            serverInfo.errorMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
-                        )
-                    }
-                    TextButton(
-                        onClick = onRefreshInfo,
-                        enabled = !serverInfo.isLoading,
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(if (serverInfo.isLoading) "Checking server…" else "Check server")
-                    }
-                }
+            ConnectionCard(
+                connectionStatus = connectionStatus,
+                serverInfo       = serverInfo,
+                onRefreshInfo    = onRefreshInfo
+            )
+
+            if (servers.isNotEmpty()) {
+                SectionHeader(
+                    title    = "Saved servers",
+                    modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+                )
             }
 
             servers.forEach { server ->
@@ -114,24 +71,22 @@ fun ServerSwitcherSheet(
             }
 
             if (servers.isEmpty()) {
-                Box(
-                    Modifier.fillMaxWidth().padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "No server configured",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    "No server configured",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
             }
 
-            FilledTonalButton(
+            OutlinedButton(
                 onClick = { onDismiss(); onAddServer() },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                shape = MaterialTheme.shapes.large
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
+                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                 Text("Add server")
             }
         }
@@ -143,7 +98,11 @@ fun ServerSwitcherSheet(
             icon = { Icon(Icons.Outlined.Warning, null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("Remove ${server.name}?") },
             text = {
-                Text("This removes the saved server and its locally cached messages from this device.")
+                Text(
+                    if (server.isActive && servers.size > 1)
+                        "This removes the server and its cached messages from this device. Gotify+ will switch to another saved server."
+                    else "This removes the saved server and its locally cached messages from this device."
+                )
             },
             confirmButton = {
                 Button(
@@ -151,13 +110,88 @@ fun ServerSwitcherSheet(
                         onRemoveServer(server.id)
                         serverToRemove = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text("Remove") }
             },
             dismissButton = {
                 TextButton(onClick = { serverToRemove = null }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+private fun ConnectionCard(
+    connectionStatus: ConnectionStatus,
+    serverInfo: ServerInfoUiState,
+    onRefreshInfo: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ConnectionDot(connectionStatus)
+                    Text(
+                        when (connectionStatus) {
+                            ConnectionStatus.CONNECTED -> "Stream is live"
+                            ConnectionStatus.CONNECTING -> "Connecting…"
+                            ConnectionStatus.ERROR -> "Connection needs attention"
+                            ConnectionStatus.DISCONNECTED -> "Stream is offline"
+                        },
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                val details = when {
+                    serverInfo.isLoading -> "Checking server…"
+                    serverInfo.version != null || serverInfo.health != null -> buildString {
+                        serverInfo.version?.let { append("Gotify $it") }
+                        serverInfo.health?.let {
+                            if (isNotEmpty()) append(" · ")
+                            append("Health: $it")
+                        }
+                        serverInfo.database?.let {
+                            if (isNotEmpty()) append(" · ")
+                            append("DB: $it")
+                        }
+                    }
+                    else -> serverInfo.errorMessage
+                }
+                if (details != null) {
+                    Text(
+                        details,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                    )
+                }
+            }
+            if (serverInfo.isLoading) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            } else {
+                IconButton(onClick = onRefreshInfo) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Check server status")
+                }
+            }
+        }
     }
 }
 
@@ -172,23 +206,24 @@ private fun ServerRow(
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = if (server.isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-        border = if (server.isActive) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
+        shape = MaterialTheme.shapes.large,
+        color = if (server.isActive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = if (server.isActive) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Surface(
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.surface
+                shape = MaterialTheme.shapes.medium,
+                color = if (server.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest
             ) {
                 Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Outlined.Storage, null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        if (server.isActive) Icons.Outlined.Check else Icons.Outlined.Dns,
+                        contentDescription = if (server.isActive) "Active server" else null,
+                        tint = if (server.isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -201,10 +236,10 @@ private fun ServerRow(
                 ) {
                     Text(
                         text = server.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     if (server.isActive) ConnectionDot(status = connectionStatus)
                 }
@@ -217,17 +252,13 @@ private fun ServerRow(
                 )
             }
 
-            if (server.isActive) {
+            IconButton(onClick = onRemove) {
                 Icon(
-                    Icons.Outlined.CheckCircle,
-                    "Active server",
-                    tint = MaterialTheme.colorScheme.primary
+                    Icons.Outlined.DeleteOutline,
+                    contentDescription = "Remove ${server.name}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Outlined.DeleteOutline, "Remove server")
-            }
-
         }
     }
 }

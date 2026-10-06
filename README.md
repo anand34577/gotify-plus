@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/hero.png" alt="Gotify+ — a modern Android client for self-hosted Gotify" width="100%">
+</p>
+
 # Gotify+
 
 A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push notification server. Built entirely with Jetpack Compose and Material 3, Gotify+ replaces the official Android app with a cleaner interface, per-app notification channels, real-time WebSocket streaming, and offline message caching.
@@ -7,16 +11,25 @@ A modern Android client for [Gotify](https://gotify.net/) — a self-hosted push
 ## Screenshots
 
 <p align="center">
-  <img src="app/images/login.png" alt="Login" width="250">
-  <img src="app/images/messages.png" alt="Messages" width="250">
-  <img src="app/images/messages_selected.png" alt="Messages Selected" width="250">
-  
+  <img src="docs/images/screenshots/01-login.png" alt="Sign in" width="200">
+  <img src="docs/images/screenshots/02-messages.png" alt="Message feed" width="200">
+  <img src="docs/images/screenshots/03-message-detail.png" alt="Message detail with Markdown" width="200">
+  <img src="docs/images/screenshots/04-applications.png" alt="Applications" width="200">
 </p>
-</br>
 <p align="center">
-  <img src="app/images/application.png" alt="Application" width="250">
-  <img src="app/images/add_new_application.png" alt="Add New Application" width="250">
-  <img src="app/images/settings.png" alt="Settings" width="250">
+  <img src="docs/images/screenshots/06-search.png" alt="Search" width="200">
+  <img src="docs/images/screenshots/07-servers.png" alt="Server switcher" width="200">
+  <img src="docs/images/screenshots/05-new-application.png" alt="New application" width="200">
+  <img src="docs/images/screenshots/08-settings.png" alt="Settings" width="200">
+</p>
+
+### Dark theme
+
+<p align="center">
+  <img src="docs/images/screenshots/09-messages-dark.png" alt="Messages, dark" width="200">
+  <img src="docs/images/screenshots/10-message-detail-dark.png" alt="Message detail, dark" width="200">
+  <img src="docs/images/screenshots/11-applications-dark.png" alt="Applications, dark" width="200">
+  <img src="docs/images/screenshots/12-settings-dark.png" alt="Settings, dark" width="200">
 </p>
 
 ## Features

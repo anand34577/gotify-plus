@@ -10,7 +10,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import com.gotify.client.R
+import com.gotify.client.ui.components.EmptyState
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -47,6 +51,10 @@ data class BottomNavDestination(
     val label:        String
 )
 
+private val topLevelRoutes = setOf(Routes.HOME, Routes.APPS, Routes.SETTINGS)
+
+private fun NavBackStackEntry.isTopLevel() = destination.route in topLevelRoutes
+
 val bottomNavDestinations = listOf(
     BottomNavDestination(Routes.HOME,     Icons.Outlined.Inbox,    Icons.Filled.Inbox,    "Messages"),
     BottomNavDestination(Routes.APPS,     Icons.Outlined.Apps,     Icons.Filled.Apps,     "Apps"),
@@ -76,6 +84,8 @@ fun MainNavHost(
 
             Scaffold(
                 modifier = Modifier.weight(1f),
+                // Each screen owns its own insets (top bars, lists); this scaffold only reserves the bottom bar.
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 bottomBar = {
                     if (!useNavigationRail) {
                         AnimatedVisibility(
@@ -94,11 +104,28 @@ fun MainNavHost(
                 NavHost(
                     navController      = navController,
                     startDestination   = Routes.HOME,
-                    modifier           = Modifier.padding(innerPadding),
-                    enterTransition    = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 10 } },
-                    exitTransition     = { fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { -it / 10 } },
-                    popEnterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 10 } },
-                    popExitTransition  = { fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { it / 10 } }
+                    // consumeWindowInsets: the bottom bar already covers the navigation-bar inset,
+                    // so screens below must not pad for it a second time.
+                    modifier           = Modifier
+                        .padding(innerPadding)
+                        .consumeWindowInsets(innerPadding),
+                    // Tabs fade through (Material guidance for peer destinations); drill-downs slide.
+                    enterTransition    = {
+                        if (initialState.isTopLevel() && targetState.isTopLevel()) fadeIn(tween(220, delayMillis = 60))
+                        else fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 8 }
+                    },
+                    exitTransition     = {
+                        if (initialState.isTopLevel() && targetState.isTopLevel()) fadeOut(tween(90))
+                        else fadeOut(tween(180)) + slideOutHorizontally(tween(260)) { -it / 8 }
+                    },
+                    popEnterTransition = {
+                        if (initialState.isTopLevel() && targetState.isTopLevel()) fadeIn(tween(220, delayMillis = 60))
+                        else fadeIn(tween(220)) + slideInHorizontally(tween(260)) { -it / 8 }
+                    },
+                    popExitTransition  = {
+                        if (initialState.isTopLevel() && targetState.isTopLevel()) fadeOut(tween(90))
+                        else fadeOut(tween(180)) + slideOutHorizontally(tween(260)) { it / 8 }
+                    }
                 ) {
 
             composable(Routes.HOME) {
@@ -172,11 +199,10 @@ fun MainNavHost(
 
                 SettingsScreen(
                     state                 = state,
-                    onBack                = { navController.popBackStack() },
                     onToggleNotifications = vm::setNotifications,
                     onToggleVibration     = vm::setVibration,
                     onToggleDynamicColor  = vm::setDynamicColor,
-                    onToggleDarkTheme     = vm::setDarkTheme,
+                    onSetThemeMode        = vm::setThemeMode,
                     onToggleMarkdown      = vm::setMarkdown,
                     onToggleKeepAlive     = vm::setKeepAlive,
                     onToggleQuietHours    = vm::setQuietHoursEnabled,
@@ -229,11 +255,18 @@ fun MainNavHost(
                         }
                     )
                 } ?: if (loaded) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                            Text("Message not found", style = MaterialTheme.typography.titleMedium)
-                            TextButton(onClick = { navController.popBackStack() }) { Text("Go back") }
-                        }
+                    Box(
+                        Modifier.fillMaxSize().systemBarsPadding(),
+                        contentAlignment = androidx.compose.ui.Alignment.Center
+                    ) {
+                        EmptyState(
+                            icon     = Icons.Outlined.SearchOff,
+                            title    = "Message not found",
+                            subtitle = "It may have been deleted on the server or from another device.",
+                            action   = {
+                                FilledTonalButton(onClick = { navController.popBackStack() }) { Text("Go back") }
+                            }
+                        )
                     }
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
@@ -319,7 +352,8 @@ fun MainNavHost(
                     isLoading = state.isLoading,
                     errorMessage = state.errorMessage,
                     onLoginWithPassword = vm::loginWithPassword,
-                    onLoginWithToken = vm::loginWithToken
+                    onLoginWithToken = vm::loginWithToken,
+                    onBack = { navController.popBackStack() }
                 )
             }
                 }
@@ -357,7 +391,7 @@ private fun GotifyBottomBar(
 ) {
     NavigationBar(
         modifier       = modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 0.dp
     ) {
         bottomNavDestinations.forEach { dest ->
@@ -379,16 +413,11 @@ private fun GotifyBottomBar(
                         contentDescription = dest.label
                     )
                 },
-                label = {
-                    Text(
-                        text       = dest.label,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                    )
-                },
+                label = { Text(dest.label, style = MaterialTheme.typography.labelMedium) },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor    = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor    = MaterialTheme.colorScheme.primaryContainer
                 )
             )
         }
@@ -407,18 +436,14 @@ private fun GotifyNavigationRail(
             .navigationBarsPadding(),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         header = {
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.padding(top = 8.dp, bottom = 20.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.NotificationsActive,
-                    contentDescription = "Gotify+",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(14.dp).size(28.dp)
-                )
-            }
+            Image(
+                painter = painterResource(R.drawable.main_logo),
+                contentDescription = "Gotify+",
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 24.dp)
+                    .size(48.dp)
+                    .clip(MaterialTheme.shapes.medium)
+            )
         }
     ) {
         bottomNavDestinations.forEach { dest ->
@@ -440,12 +465,12 @@ private fun GotifyNavigationRail(
                         contentDescription = dest.label
                     )
                 },
-                label = { Text(dest.label) },
+                label = { Text(dest.label, style = MaterialTheme.typography.labelMedium) },
                 alwaysShowLabel = true,
                 colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer
                 )
             )
         }

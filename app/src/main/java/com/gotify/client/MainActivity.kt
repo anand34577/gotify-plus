@@ -25,6 +25,8 @@ import android.os.CancellationSignal
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.isSystemInDarkTheme
+import com.gotify.client.data.datastore.ThemeMode
 import com.gotify.client.service.GotifyListenerService
 import com.gotify.client.service.SyncJobService
 import com.gotify.client.ui.login.LoginScreen
@@ -84,7 +86,11 @@ class MainActivity : ComponentActivity() {
             }
 
             GotifyTheme(
-                darkTheme    = settingsState.darkThemeEnabled,
+                darkTheme    = when (settingsState.themeMode) {
+                    ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                    ThemeMode.LIGHT  -> false
+                    ThemeMode.DARK   -> true
+                },
                 dynamicColor = settingsState.dynamicColorEnabled
             ) {
                 Surface(
@@ -177,15 +183,27 @@ private fun LockScreen(onUnlock: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            Icons.Outlined.Lock, contentDescription = null,
-            modifier = Modifier.size(56.dp),
-            tint = MaterialTheme.colorScheme.primary
+        Surface(
+            shape = androidx.compose.foundation.shape.CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Icon(
+                Icons.Outlined.Lock, contentDescription = null,
+                modifier = Modifier.padding(20.dp).size(36.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Text("Gotify+ is locked", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Unlock with your fingerprint, face or screen lock to view messages.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
-        Spacer(Modifier.height(16.dp))
-        Text("Gotify+ is locked", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onUnlock) { Text("Unlock") }
+        Spacer(Modifier.height(28.dp))
+        Button(onClick = onUnlock, modifier = Modifier.heightIn(min = 48.dp)) { Text("Unlock") }
     }
 }
 

@@ -20,6 +20,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.data.model.GotifyMessage
@@ -57,14 +61,19 @@ fun MessageDetailScreen(
         errorMessage?.let { snackbarHostState.showSnackbar(it) }
     }
 
-
     val isMarkdown = markdownEnabled && message.extras?.display?.contentType == "text/markdown"
     val hasRemoteMarkdownImage = isMarkdown && remember(message.message) {
         Regex("!\\[[^]]*]\\(\\s*https?://", RegexOption.IGNORE_CASE).containsMatchIn(message.message)
     }
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val fullTimestamp = remember(message.date) {
+        parseGotifyDate(message.date)
+            ?.atZone(java.time.ZoneId.systemDefault())
+            ?.format(java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT))
+    }
 
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar   = {
             TopAppBar(
@@ -110,62 +119,61 @@ fun MessageDetailScreen(
                         Icon(Icons.Outlined.Share, contentDescription = "Share message")
                     }
                     IconButton(onClick = { showDeleteDialog = true }) {
-                        Icon(
-                            Icons.Outlined.DeleteOutline,
-                            contentDescription = "Delete",
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete message")
                     }
                 },
-                expandedHeight = 56.dp,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                colors = gotifyTopAppBarColors(),
+                scrollBehavior = scrollBehavior
             )
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
 
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState()),
+            contentAlignment = Alignment.TopCenter
+        ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(padding)
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .widthIn(max = 760.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(top = 4.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-
             if (hasRemoteMarkdownImage) {
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.tertiaryContainer
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 ) {
                     Row(
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Outlined.Visibility, contentDescription = null)
+                        Icon(Icons.Outlined.PrivacyTip, contentDescription = null, modifier = Modifier.size(20.dp))
                         Text(
                             "This message includes remote images. Loading them may reveal your IP address to the image host.",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
-                Spacer(Modifier.height(10.dp))
             }
 
             Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                onClick = onOpenAppInbox,
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainer
             ) {
                 Row(
                     modifier  = Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = onOpenAppInbox)
-                        .padding(16.dp),
+                        .padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 12.dp),
                     verticalAlignment    = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
@@ -179,64 +187,83 @@ fun MessageDetailScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text       = application?.name ?: "App ${message.appId}",
-                            style      = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color      = MaterialTheme.colorScheme.primary
+                            style      = MaterialTheme.typography.titleMedium,
+                            color      = MaterialTheme.colorScheme.onSurface,
+                            maxLines   = 1,
+                            overflow   = TextOverflow.Ellipsis
                         )
-                        if (!application?.description.isNullOrBlank()) {
-                            Text(
-                                text  = application.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            RelativeTime(isoDate = message.date)
+                            if (message.priority != 0) {
+                                Text("·", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                PriorityBadge(priority = message.priority)
+                            }
                         }
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        PriorityBadge(priority = message.priority)
-                        Spacer(Modifier.height(4.dp))
-                        RelativeTime(isoDate = message.date)
-                    }
+                    Text(
+                        "View all",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        Icons.Outlined.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
 
-
-            if (message.title.isNotBlank()) {
-                Text(
-                    text       = message.title,
-                    style      = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color      = MaterialTheme.colorScheme.onBackground,
-                    lineHeight = 32.sp
-                )
+            Column(
+                modifier = Modifier.padding(horizontal = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (message.title.isNotBlank()) {
+                    SelectionContainer {
+                        Text(
+                            text       = message.title,
+                            style      = MaterialTheme.typography.headlineSmall,
+                            color      = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                }
+                if (fullTimestamp != null) {
+                    Text(
+                        text  = fullTimestamp,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
-
             Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     if (isMarkdown) {
                         MarkdownText(
                             markdown  = message.message,
                             style     = MaterialTheme.typography.bodyLarge.copy(
-                                color = MaterialTheme.colorScheme.onSurface,
-                                lineHeight = 24.sp
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         )
                     } else {
-                        Text(
-                            text       = message.message,
-                            style      = MaterialTheme.typography.bodyLarge,
-                            color      = MaterialTheme.colorScheme.onSurface,
-                            lineHeight = 24.sp
-                        )
+                        // Long-press to select and copy part of a message.
+                        SelectionContainer {
+                            Text(
+                                text  = message.message,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
-
 
             val bigImageUrl = message.extras?.notification?.bigImageUrl
             if (!bigImageUrl.isNullOrBlank()) {
@@ -246,7 +273,6 @@ fun MessageDetailScreen(
                     authBaseUrl = serverBaseUrl
                 )
             }
-
 
             val actionUrl = message.extras?.notification?.click?.url
                 ?: message.extras?.action?.onClick?.intentUrl
@@ -260,19 +286,17 @@ fun MessageDetailScreen(
                             }
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape    = RoundedCornerShape(12.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    shape    = MaterialTheme.shapes.large
                 ) {
-                    Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Open Action", fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                    Text("Open link")
                 }
             }
 
-
             DetailMetadataCard(message = message)
-
-            Spacer(Modifier.height(40.dp))
+        }
         }
     }
 
@@ -288,7 +312,10 @@ fun MessageDetailScreen(
                         showDeleteDialog = false
                         onDelete()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text("Delete") }
             },
             dismissButton = {
@@ -297,7 +324,6 @@ fun MessageDetailScreen(
         )
     }
 }
-
 
 
 @Composable
@@ -321,8 +347,7 @@ private fun MessageImageCard(
 
     Surface(
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        color = MaterialTheme.colorScheme.surfaceContainer
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(
@@ -376,15 +401,17 @@ private fun DetailMetadataCard(message: GotifyMessage) {
     var expanded by remember { mutableStateOf(false) }
 
     Surface(
-        shape  = RoundedCornerShape(16.dp),
-        color  = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape  = MaterialTheme.shapes.large,
+        color  = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column {
+        Column(Modifier.animateContentSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
+                    .clickable(onClickLabel = if (expanded) "Hide details" else "Show details") { expanded = !expanded }
+                    .heightIn(min = 48.dp)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment    = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -420,7 +447,7 @@ private fun DetailMetadataCard(message: GotifyMessage) {
                 ) {
                     MetaRow("Message ID",  "#${message.id}")
                     MetaRow("App ID",      "#${message.appId}")
-                    MetaRow("Priority",    "${message.priority}")
+                    MetaRow("Priority",    "${message.priority} (${priorityLabel(message.priority)})")
                     MetaRow("Timestamp", parseGotifyDate(message.date)
                         ?.atZone(java.time.ZoneId.systemDefault())
                         ?.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy · HH:mm:ss"))

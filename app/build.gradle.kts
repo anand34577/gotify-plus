@@ -19,7 +19,7 @@ android {
         targetSdk     = 37
         // CI run number keeps every published release upgradable over the previous one.
         versionCode   = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-        versionName   = "1.0.0"
+        versionName   = "1.1.0"
     }
 
     // Release signing comes from env vars set by CI (see .github/workflows/release.yml).
