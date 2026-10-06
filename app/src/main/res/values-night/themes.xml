@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base theme — Compose draws everything; this sets the launch window to match the app background -->
-    <style name="Theme.GotifyClient" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.GotifyClient" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/app_background</item>
         <item name="android:colorBackground">@color/app_background</item>
         <item name="android:windowIsTranslucent">false</item>

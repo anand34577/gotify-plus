@@ -3,7 +3,6 @@ package com.gotify.client.ui.search
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -15,6 +14,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -49,39 +55,50 @@ fun SearchScreen(
     modifier: Modifier = Modifier
 ) {
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
 
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar   = {
             TopAppBar(
                 title = {
-                    OutlinedTextField(
+                    // Pill-shaped search field that fits the app bar (an outlined field gets clipped at this height).
+                    TextField(
                         value         = query,
                         onValueChange = onQueryChange,
                         modifier      = Modifier
                             .fillMaxWidth()
+                            .padding(end = 12.dp)
+                            .heightIn(min = 48.dp)
                             .focusRequester(focusRequester),
-                        placeholder   = { Text("Search messages…") },
+                        placeholder   = { Text("Search messages") },
+                        leadingIcon   = { Icon(Icons.Outlined.Search, contentDescription = null) },
                         singleLine    = true,
+                        textStyle     = MaterialTheme.typography.bodyLarge,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Text,
                             imeAction    = ImeAction.Search
                         ),
+                        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                         trailingIcon  = {
-                            AnimatedVisibility(visible = query.isNotEmpty()) {
+                            AnimatedVisibility(visible = query.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
                                 IconButton(onClick = onClearQuery) {
-                                    Icon(Icons.Outlined.Clear, "Clear")
+                                    Icon(Icons.Outlined.Close, "Clear search")
                                 }
                             }
                         },
-                        shape  = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                            focusedBorderColor   = MaterialTheme.colorScheme.primary
+                        shape  = CircleShape,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor   = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            focusedIndicatorColor   = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor  = Color.Transparent
                         )
                     )
                 },
@@ -90,10 +107,8 @@ fun SearchScreen(
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
                     }
                 },
-                expandedHeight = 56.dp,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                colors = gotifyTopAppBarColors(),
+                scrollBehavior = scrollBehavior
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -111,40 +126,39 @@ fun SearchScreen(
                 onAppFilter      = onAppFilter,
                 onDateRange      = onDateRange
             )
-          Box(Modifier.weight(1f)) {
+            Box(Modifier.weight(1f)) {
             when {
 
                 query.isBlank() && !filters.isActive -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         EmptyState(
                             icon     = Icons.Outlined.Search,
-                            title    = "Search messages",
-                            subtitle = "Search by text, or pick a filter above"
+                            title    = "Search your messages",
+                            subtitle = "Find messages stored on this device by text, or narrow them down with the filters above."
                         )
                     }
                 }
-
 
                 results.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         EmptyState(
                             icon     = Icons.Outlined.SearchOff,
-                            title    = if (query.isBlank()) "No matching messages" else "No results for \"$query\"",
-                            subtitle = "Try a different search term or filter"
+                            title    = if (query.isBlank()) "No matching messages" else "No results for \u201c${query.trim()}\u201d",
+                            subtitle = "Try a different search term or clear some filters."
                         )
                     }
                 }
 
-
                 else -> {
                     LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.fillMaxSize().widthIn(max = 840.dp).align(Alignment.TopCenter),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        item {
+                        item(key = "count") {
                             SectionHeader(
                                 title = "${results.size} result${if (results.size != 1) "s" else ""}",
-                                modifier = Modifier.padding(bottom = 4.dp)
+                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
                             )
                         }
 
@@ -160,7 +174,6 @@ fun SearchScreen(
                                 onClick     = { onMessageClick(message) }
                             )
                         }
-                        item { Spacer(Modifier.height(80.dp)) }
                     }
                 }
             }
@@ -182,15 +195,16 @@ private fun SearchFilterRow(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
             FilterChip(
                 selected    = filters.appId != null,
                 onClick     = { appMenuOpen = true },
-                label       = { Text(filters.appId?.let { applications[it]?.name } ?: "Any app") },
-                trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null, Modifier.size(18.dp)) }
+                label       = { Text(filters.appId?.let { applications[it]?.name } ?: "Any app", maxLines = 1) },
+                trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null, Modifier.size(FilterChipDefaults.IconSize)) }
             )
             DropdownMenu(expanded = appMenuOpen, onDismissRequest = { appMenuOpen = false }) {
                 DropdownMenuItem(text = { Text("Any app") }, onClick = { onAppFilter(null); appMenuOpen = false })
@@ -199,24 +213,24 @@ private fun SearchFilterRow(
                 }
             }
         }
+        VerticalDivider(Modifier.height(24.dp))
         PriorityFilter.entries.forEach { p ->
             FilterChip(
                 selected = filters.priority == p,
                 onClick  = { onPriorityFilter(p) },
-                label    = { Text(p.label) }
+                label    = { Text("${p.label} priority") }
             )
         }
+        VerticalDivider(Modifier.height(24.dp))
         listOf(DateRange.DAY, DateRange.WEEK).forEach { r ->
             FilterChip(
                 selected = filters.dateRange == r,
                 onClick  = { onDateRange(r) },
-                label    = { Text(r.label) }
+                label    = { Text("Last ${r.label}") }
             )
         }
     }
 }
-
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -251,12 +265,13 @@ private fun SearchResultCard(
                 )
                 Text(
                     text       = appName,
-                    style      = MaterialTheme.typography.labelMedium,
-                    color      = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
+                    style      = MaterialTheme.typography.labelLarge,
+                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis,
                     modifier   = Modifier.weight(1f)
                 )
-                PriorityBadge(priority = message.priority)
+                if (message.priority >= 8) PriorityBadge(priority = message.priority)
                 RelativeTime(isoDate = message.date)
             }
 
@@ -265,51 +280,52 @@ private fun SearchResultCard(
             if (message.title.isNotBlank()) {
                 Text(
                     text       = highlightQuery(message.title, query),
-                    style      = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines   = 1
+                    style      = MaterialTheme.typography.titleMedium,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
             }
 
             Text(
-                text     = highlightQuery(message.message, query),
-                style    = MaterialTheme.typography.bodySmall,
+                text     = highlightQuery(remember(message.message) { previewText(message.message) }, query),
+                style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
 }
 
-
-
 @Composable
-private fun highlightQuery(text: String, query: String) = buildAnnotatedString {
-    if (query.isBlank()) {
-        append(text)
-        return@buildAnnotatedString
-    }
-    val lowerText  = text.lowercase()
-    val lowerQuery = query.lowercase()
-    var start = 0
-
-    while (start < text.length) {
-        val idx = lowerText.indexOf(lowerQuery, start)
-        if (idx == -1) {
-            append(text.substring(start))
-            break
+private fun highlightQuery(text: String, query: String): AnnotatedString {
+    val style = SpanStyle(
+        background = MaterialTheme.colorScheme.primaryContainer,
+        color      = MaterialTheme.colorScheme.onPrimaryContainer,
+        fontWeight = FontWeight.SemiBold
+    )
+    // The ViewModel searches with the trimmed query, so highlight the same thing.
+    val needle = query.trim()
+    return remember(text, needle, style) {
+        buildAnnotatedString {
+            if (needle.isEmpty()) {
+                append(text)
+                return@buildAnnotatedString
+            }
+            // ignoreCase indexOf works on the original string, so indices stay valid even when
+            // lowercasing would change the text length (e.g. "İ").
+            var start = 0
+            while (start < text.length) {
+                val idx = text.indexOf(needle, start, ignoreCase = true)
+                if (idx == -1) {
+                    append(text.substring(start))
+                    break
+                }
+                append(text.substring(start, idx))
+                withStyle(style) { append(text.substring(idx, idx + needle.length)) }
+                start = idx + needle.length
+            }
         }
-        append(text.substring(start, idx))
-        withStyle(
-            SpanStyle(
-                background = MaterialTheme.colorScheme.primaryContainer,
-                color      = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-        ) {
-            append(text.substring(idx, idx + query.length))
-        }
-        start = idx + query.length
     }
 }

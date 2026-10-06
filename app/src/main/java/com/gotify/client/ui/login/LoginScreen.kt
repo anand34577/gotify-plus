@@ -1,29 +1,34 @@
 package com.gotify.client.ui.login
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import com.gotify.client.R
-import com.gotify.client.ui.theme.*
 
 @Composable
 fun LoginScreen(
@@ -31,18 +36,21 @@ fun LoginScreen(
     errorMessage: String?,
     onLoginWithPassword: (serverUrl: String, username: String, password: String, serverName: String) -> Unit,
     onLoginWithToken: (serverUrl: String, token: String, serverName: String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Set when adding a second server, so the user can back out. */
+    onBack: (() -> Unit)? = null
 ) {
-    var serverUrl by remember { mutableStateOf("") }
-    var serverName by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
+    // Saveable: rotation or process death must not wipe what the user typed (the password is excluded).
+    var serverUrl by rememberSaveable { mutableStateOf("") }
+    var serverName by rememberSaveable { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
-    var useToken by remember { mutableStateOf(false) }
+    var useToken by rememberSaveable { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
-    // Grouped Focus Requesters
-    val (urlFocus, nameFocus, userFocus, passFocus) = remember { FocusRequester.createRefs() }
+    val (nameFocus, userFocus, passFocus) = remember { FocusRequester.createRefs() }
 
     val canSubmit by remember(serverUrl, username, password, token, useToken, isLoading) {
         derivedStateOf {
@@ -53,26 +61,28 @@ fun LoginScreen(
 
     fun submit() {
         if (!canSubmit) return
+        focusManager.clearFocus()
         if (useToken) onLoginWithToken(serverUrl.trim(), token.trim(), serverName.trim())
         else onLoginWithPassword(serverUrl.trim(), username.trim(), password, serverName.trim())
     }
 
-    // Root Container - Handles Tablet Centering
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        // Decorative Background Elements (Responsive)
+        val bars = WindowInsets.systemBars.asPaddingValues()
+        val viewportHeight = maxHeight - bars.calculateTopPadding() - bars.calculateBottomPadding()
+
+        // Decorative glow, kept subtle so it never competes with the form.
         Box(
             Modifier
-                .fillMaxSize(0.6f)
+                .fillMaxSize(0.7f)
                 .align(Alignment.TopStart)
-                .offset(x = (-50).dp, y = (-50).dp)
+                .offset(x = (-60).dp, y = (-60).dp)
                 .background(
                     Brush.radialGradient(
-                        listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), Color.Transparent)
+                        listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), Color.Transparent)
                     ),
                     CircleShape
                 )
@@ -81,220 +91,243 @@ fun LoginScreen(
             Modifier
                 .fillMaxSize(0.5f)
                 .align(Alignment.BottomEnd)
-                .offset(x = 50.dp, y = 50.dp)
+                .offset(x = 60.dp, y = 60.dp)
                 .background(
                     Brush.radialGradient(
-                        listOf(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f), Color.Transparent)
+                        listOf(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.10f), Color.Transparent)
                     ),
                     CircleShape
                 )
         )
 
-        // Main Content Column - Constrained for Tablets
         Column(
             modifier = Modifier
-                .widthIn(max = 440.dp) // <- THE MAGIC FIX FOR TABLETS
-                .fillMaxHeight()
-                .imePadding()
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center // Centers vertically on tall screens
+                .systemBarsPadding()
+                .imePadding(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
-            // Branding Section
-            Image(
-                painter = painterResource(id = R.drawable.main_logo),
-                contentDescription = "Gotify+ Logo",
-                modifier = Modifier.size(88.dp)
-            )
-
-            Spacer(Modifier.height(24.dp))
-
-            Text(
-                text = "Gotify+",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onBackground,
-                letterSpacing = (-0.5).sp
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                text = "Connect to your server",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(Modifier.height(40.dp))
-
-            // Form Card
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            // Inner column gets a real min height so `Arrangement.Center` works inside the scroll.
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 440.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = viewportHeight)
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                Image(
+                    painter = painterResource(id = R.drawable.main_logo),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                Text(
+                    text = if (onBack != null) "Add a server" else "Welcome to Gotify+",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = "Connect to your self-hosted Gotify server",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(32.dp))
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                 ) {
-
-                    FieldGroup(label = "SERVER DETAILS") {
-                        LoginField(
-                            value = serverUrl,
-                            onValueChange = { serverUrl = it },
-                            label = "Server URL",
-                            placeholder = "https://gotify.example.com",
-                            icon = Icons.Outlined.Language,
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Next,
-                            onNext = { nameFocus.requestFocus() },
-                            modifier = Modifier.focusRequester(urlFocus)
-                        )
-                        LoginField(
-                            value = serverName,
-                            onValueChange = { serverName = it },
-                            label = "Nickname (Optional)",
-                            placeholder = "Home, VPS, Work…",
-                            icon = Icons.Outlined.BookmarkBorder,
-                            imeAction = ImeAction.Next,
-                            onNext = { userFocus.requestFocus() },
-                            modifier = Modifier.focusRequester(nameFocus)
-                        )
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    FieldGroup(label = "CREDENTIALS") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = !useToken, onClick = { useToken = false }, label = { Text("Password") })
-                            FilterChip(selected = useToken, onClick = { useToken = true }, label = { Text("Client token") })
-                        }
-                        Text(
-                            text = if (useToken) {
-                                "Use a client token from Gotify when you do not want to share a password with this device."
-                            } else {
-                                "Gotify will create a dedicated client token for this device."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (useToken) {
-                            LoginField(
-                                value = token,
-                                onValueChange = { token = it },
-                                label = "Client token",
-                                icon = Icons.Outlined.Key,
-                                isPassword = true,
-                                passwordVisible = passwordVisible,
-                                onToggleVisible = { passwordVisible = !passwordVisible },
-                                imeAction = ImeAction.Done,
-                                onDone = { submit() },
-                                modifier = Modifier.focusRequester(userFocus)
-                            )
-                        } else {
-                            LoginField(
-                                value = username,
-                                onValueChange = { username = it },
-                                label = "Username",
-                                icon = Icons.Outlined.Person,
-                                imeAction = ImeAction.Next,
-                                onNext = { passFocus.requestFocus() },
-                                modifier = Modifier.focusRequester(userFocus)
-                            )
-                            LoginField(
-                                value = password,
-                                onValueChange = { password = it },
-                                label = "Password",
-                                icon = Icons.Outlined.Lock,
-                                isPassword = true,
-                                passwordVisible = passwordVisible,
-                                onToggleVisible = { passwordVisible = !passwordVisible },
-                                imeAction = ImeAction.Done,
-                                onDone = { submit() },
-                                modifier = Modifier.focusRequester(passFocus)
-                            )
-                        }
-                    }
-
-                    // Error Message Animation
-                    AnimatedVisibility(
-                        visible = errorMessage != null,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
-                        errorMessage?.let {
+
+                        FieldGroup(label = "Server") {
+                            LoginField(
+                                value = serverUrl,
+                                onValueChange = { serverUrl = it },
+                                label = "Server URL",
+                                placeholder = "https://gotify.example.com",
+                                icon = Icons.Outlined.Language,
+                                keyboardType = KeyboardType.Uri,
+                                imeAction = ImeAction.Next,
+                                onNext = { nameFocus.requestFocus() }
+                            )
+                            LoginField(
+                                value = serverName,
+                                onValueChange = { serverName = it },
+                                label = "Nickname (optional)",
+                                placeholder = "Home, VPS, Work…",
+                                icon = Icons.Outlined.BookmarkBorder,
+                                imeAction = ImeAction.Next,
+                                onNext = { userFocus.requestFocus() },
+                                modifier = Modifier.focusRequester(nameFocus)
+                            )
+                        }
+
+                        FieldGroup(label = "Sign in with") {
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                SegmentedButton(
+                                    selected = !useToken,
+                                    onClick = { useToken = false; passwordVisible = false },
+                                    shape = SegmentedButtonDefaults.itemShape(0, 2),
+                                    label = { Text("Password") }
+                                )
+                                SegmentedButton(
+                                    selected = useToken,
+                                    onClick = { useToken = true; passwordVisible = false },
+                                    shape = SegmentedButtonDefaults.itemShape(1, 2),
+                                    label = { Text("Client token") }
+                                )
+                            }
+                            Text(
+                                text = if (useToken) {
+                                    "Paste a client token from the Gotify web UI. Your password never leaves the browser."
+                                } else {
+                                    "Gotify+ creates a dedicated client token for this device."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                            AnimatedContent(
+                                targetState = useToken,
+                                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                                label = "credentials"
+                            ) { tokenMode ->
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    if (tokenMode) {
+                                        LoginField(
+                                            value = token,
+                                            onValueChange = { token = it },
+                                            label = "Client token",
+                                            icon = Icons.Outlined.Key,
+                                            isPassword = true,
+                                            keyboardType = KeyboardType.Password,
+                                            passwordVisible = passwordVisible,
+                                            onToggleVisible = { passwordVisible = !passwordVisible },
+                                            imeAction = ImeAction.Done,
+                                            onDone = { submit() },
+                                            modifier = Modifier.focusRequester(userFocus)
+                                        )
+                                    } else {
+                                        LoginField(
+                                            value = username,
+                                            onValueChange = { username = it },
+                                            label = "Username",
+                                            icon = Icons.Outlined.Person,
+                                            imeAction = ImeAction.Next,
+                                            onNext = { passFocus.requestFocus() },
+                                            modifier = Modifier.focusRequester(userFocus)
+                                        )
+                                        LoginField(
+                                            value = password,
+                                            onValueChange = { password = it },
+                                            label = "Password",
+                                            icon = Icons.Outlined.Lock,
+                                            isPassword = true,
+                                            keyboardType = KeyboardType.Password,
+                                            passwordVisible = passwordVisible,
+                                            onToggleVisible = { passwordVisible = !passwordVisible },
+                                            imeAction = ImeAction.Done,
+                                            onDone = { submit() },
+                                            modifier = Modifier.focusRequester(passFocus)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(
+                            visible = errorMessage != null,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            // Hold the last message while the exit animation runs.
+                            var lastError by remember { mutableStateOf("") }
+                            if (errorMessage != null) lastError = errorMessage
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(MaterialTheme.shapes.small)
+                                    .clip(MaterialTheme.shapes.medium)
                                     .background(MaterialTheme.colorScheme.errorContainer)
-                                    .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), MaterialTheme.shapes.small)
-                                    .padding(14.dp),
+                                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                                    .semantics { liveRegion = LiveRegionMode.Polite },
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.ErrorOutline,
-                                    contentDescription = "Error",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    fontWeight = FontWeight.Medium
+                                    text = lastError,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
                                 )
                             }
                         }
-                    }
 
-                    // Submit Button
-                    Button(
-                        onClick = { submit() },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(top = 8.dp),
-                        enabled = canSubmit,
-                        shape = MaterialTheme.shapes.medium,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                            disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.5f)
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
-                    ) {
-                        AnimatedContent(
-                            targetState = isLoading,
-                            label = "LoadingButtonAnimation"
-                        ) { loading ->
-                            if (loading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.5.dp
-                                )
-                            } else {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.AutoMirrored.Outlined.Login, contentDescription = null, Modifier.size(20.dp))
-                                    Text(
-                                        text = "Connect",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        letterSpacing = 0.5.sp
-                                    )
+                        Button(
+                            onClick = { submit() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+                            enabled = canSubmit,
+                            shape = MaterialTheme.shapes.large
+                        ) {
+                            AnimatedContent(
+                                targetState = isLoading,
+                                label = "LoadingButtonAnimation"
+                            ) { loading ->
+                                if (loading) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            color = LocalContentColor.current,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Text("Connecting…", style = MaterialTheme.typography.titleSmall)
+                                    }
+                                } else {
+                                    Text("Connect", style = MaterialTheme.typography.titleSmall)
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+
+        if (onBack != null) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(4.dp)
+                    .align(Alignment.TopStart)
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
             }
         }
     }
@@ -305,10 +338,8 @@ private fun FieldGroup(label: String, content: @Composable ColumnScope.() -> Uni
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
             modifier = Modifier.padding(start = 4.dp)
         )
         content()
@@ -320,7 +351,7 @@ private fun LoginField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     modifier: Modifier = Modifier,
     placeholder: String = "",
     isPassword: Boolean = false,
@@ -331,31 +362,21 @@ private fun LoginField(
     onNext: (() -> Unit)? = null,
     onDone: (() -> Unit)? = null
 ) {
-    val isFilled = value.isNotBlank()
-    val iconTint by animateColorAsState(
-        targetValue = if (isFilled) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.onSurfaceVariant,
-        label = "iconTint"
-    )
-
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier.fillMaxWidth(),
         label = { Text(label) },
         placeholder = if (placeholder.isNotBlank()) {
-            { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) }
+            { Text(placeholder) }
         } else null,
-        leadingIcon = {
-            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
-        },
+        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp)) },
         trailingIcon = if (isPassword && onToggleVisible != null) {
             {
                 IconButton(onClick = onToggleVisible) {
                     Icon(
                         imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                        contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        contentDescription = if (passwordVisible) "Hide $label" else "Show $label",
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -365,7 +386,10 @@ private fun LoginField(
             PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(
             keyboardType = keyboardType,
-            imeAction = imeAction
+            imeAction = imeAction,
+            // URLs, usernames and secrets must not be "corrected" or capitalised by the keyboard.
+            autoCorrectEnabled = keyboardType == KeyboardType.Text && label.startsWith("Nickname"),
+            capitalization = KeyboardCapitalization.None
         ),
         keyboardActions = KeyboardActions(
             onNext = { onNext?.invoke() },
@@ -374,15 +398,10 @@ private fun LoginField(
         singleLine = true,
         shape = MaterialTheme.shapes.medium,
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
             unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-            focusedLabelColor = MaterialTheme.colorScheme.primary,
-            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-            cursorColor = MaterialTheme.colorScheme.primary,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            focusedLeadingIconColor = MaterialTheme.colorScheme.primary
         )
     )
 }

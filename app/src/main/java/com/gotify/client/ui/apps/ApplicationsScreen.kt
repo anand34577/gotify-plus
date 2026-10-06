@@ -12,15 +12,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.gotify.client.data.model.GotifyApplication
 import com.gotify.client.ui.components.*
 import java.net.URI
-
-
-
-
 
 // Gotify returns "static/defaultapp.jpg" (its own logo) for apps with no custom
 // icon uploaded — treat it as "no image" so the initials avatar shows instead.
@@ -44,10 +48,6 @@ fun resolveAppImageUrl(baseUrl: String, relativePath: String): String? {
             uri.scheme.equals("https", ignoreCase = true)
     }
 }
-
-
-
-
 
 private fun muteLabel(untilMillis: Long): String {
     if (untilMillis == Long.MAX_VALUE) return "Muted"
@@ -75,8 +75,6 @@ fun AppIconResolved(
     )
 }
 
-
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApplicationsScreen(
@@ -100,41 +98,42 @@ fun ApplicationsScreen(
     var showCreateSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val pullState = rememberPullToRefreshState()
+    val listState = rememberLazyListState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val fabExpanded by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
     LaunchedEffect(errorMessage) {
         errorMessage?.let { snackbarHostState.showSnackbar(it) }
     }
 
     Scaffold(
-        modifier     = modifier,
+        modifier     = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title   = { Text("Applications", fontWeight = FontWeight.Bold) },
                 actions = {
-
-                    IconButton(onClick = onRefresh) {
-                        Icon(Icons.Outlined.Refresh, "Refresh")
+                    IconButton(onClick = onRefresh, enabled = !isRefreshing) {
+                        Icon(Icons.Outlined.Refresh, "Refresh applications")
                     }
                 },
-                expandedHeight = 56.dp,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                colors         = gotifyTopAppBarColors(),
+                scrollBehavior = scrollBehavior
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick        = { showCreateSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor   = MaterialTheme.colorScheme.onPrimary,
-                shape          = RoundedCornerShape(16.dp)
-            ) {
-                Icon(Icons.Outlined.Add, "New application")
+            if (applications.isNotEmpty()) {
+                ExtendedFloatingActionButton(
+                    onClick        = { showCreateSheet = true },
+                    expanded       = fabExpanded,
+                    icon           = { Icon(Icons.Outlined.Add, contentDescription = null) },
+                    text           = { Text("New app") },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor   = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,
@@ -147,42 +146,45 @@ fun ApplicationsScreen(
             if (isLoading && applications.isEmpty()) {
                 LazyColumn(
                     modifier            = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 960.dp)
+                        .fillMaxSize()
+                        .widthIn(max = 840.dp)
                         .align(Alignment.TopCenter),
+                    userScrollEnabled   = false,
                     contentPadding      = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(4) { ShimmerBox(Modifier.fillMaxWidth().height(80.dp)) }
+                    items(4) { ApplicationCardSkeleton() }
                 }
             } else if (applications.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     EmptyState(
                         icon     = Icons.Outlined.Apps,
                         title    = "No applications yet",
-                        subtitle = "Applications send messages to your Gotify server",
+                        subtitle = "Create an application to get a token that scripts and services can use to send you messages.",
                         action   = {
                             Button(onClick = { showCreateSheet = true }) {
-                                Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Create Application")
+                                Icon(Icons.Outlined.Add, null, Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                                Text("Create application")
                             }
                         }
                     )
                 }
             } else {
                 LazyColumn(
+                    state               = listState,
                     modifier            = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 960.dp)
+                        .fillMaxSize()
+                        .widthIn(max = 840.dp)
                         .align(Alignment.TopCenter),
-                    contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    // Bottom padding keeps the last card clear of the FAB.
+                    contentPadding      = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    item {
+                    item(key = "count") {
                         SectionHeader(
                             title    = "${applications.size} application${if (applications.size != 1) "s" else ""}",
-                            modifier = Modifier.padding(bottom = 4.dp)
+                            modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
                         )
                     }
 
@@ -203,10 +205,10 @@ fun ApplicationsScreen(
                             onClearMessages  = { onDeleteAppMessages(app.id) },
                             onEdit          = { name, description ->
                                 onEditApp(app.id, name, description)
-                            }
+                            },
+                            modifier         = Modifier.animateItem()
                         )
                     }
-                    item { Spacer(Modifier.height(80.dp)) }
                 }
             }
         }
@@ -220,8 +222,6 @@ fun ApplicationsScreen(
         )
     }
 }
-
-
 
 @Composable
 private fun ApplicationCard(
@@ -250,11 +250,10 @@ private fun ApplicationCard(
         modifier  = modifier.fillMaxWidth(),
         shape     = MaterialTheme.shapes.large,
         colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        elevation = CardDefaults.cardElevation(0.dp),
-        border    = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(
-            modifier              = Modifier.padding(16.dp),
+            modifier              = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -274,25 +273,18 @@ private fun ApplicationCard(
                 ) {
                     Text(
                         text       = application.name,
-                        style      = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        style      = MaterialTheme.typography.titleMedium,
                         color      = MaterialTheme.colorScheme.onSurface,
                         maxLines   = 1,
                         overflow   = TextOverflow.Ellipsis,
                         modifier   = Modifier.weight(1f, fill = false)
                     )
                     if (application.internal) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Text(
-                                "INTERNAL",
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                                style    = MaterialTheme.typography.labelSmall,
-                                color    = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
+                        InfoChip(
+                            text           = "Internal",
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor   = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
                     }
                 }
 
@@ -307,64 +299,40 @@ private fun ApplicationCard(
                     )
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = if (application.token != null) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        }
-                    ) {
-                        Text(
-                            if (application.token != null) "Token saved" else "Token unavailable",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (application.token != null) {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                    }
-                    if (messageCount > 0) {
-                        Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
-                            Text(
-                                "$messageCount msgs",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style    = MaterialTheme.typography.labelSmall,
-                                color    = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
+                    InfoChip(
+                        text           = when (messageCount) {
+                            0    -> "No messages"
+                            1    -> "1 message"
+                            else -> "$messageCount messages"
+                        },
+                        icon           = Icons.Outlined.Inbox,
+                        containerColor = if (messageCount > 0) MaterialTheme.colorScheme.primaryContainer
+                                         else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor   = if (messageCount > 0) MaterialTheme.colorScheme.onPrimaryContainer
+                                         else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if (isMuted) {
-                        Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Icon(Icons.Outlined.NotificationsOff, null, Modifier.size(12.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(
-                                    muteLabel(mutedUntil!!),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
+                        InfoChip(
+                            text = muteLabel(mutedUntil),
+                            icon = Icons.Outlined.NotificationsOff,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
                     }
                 }
             }
 
             Box {
                 IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Outlined.MoreVert, null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                    Icon(
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "Options for ${application.name}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
@@ -415,10 +383,13 @@ private fun ApplicationCard(
             onDismissRequest = { showConfirm = false },
             icon    = { Icon(Icons.Outlined.Warning, null, tint = MaterialTheme.colorScheme.error) },
             title   = { Text("Delete \"${application.name}\"?") },
-            text    = { Text("This will delete the application and all its messages permanently.") },
+            text    = { Text("The application, its token and all of its messages will be deleted permanently. Anything still using the token will stop working.") },
             confirmButton = {
                 Button(onClick = { onDelete(); showConfirm = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancel") } }
@@ -439,14 +410,27 @@ private fun ApplicationCard(
             title = { Text("Mute ${application.name}") },
             text  = {
                 Column {
+                    Text(
+                        "Messages still arrive and stay in your inbox; only notifications are silenced.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                     options.forEach { (label, duration) ->
                         ListItem(
                             headlineContent = { Text(label) },
+                            leadingContent = {
+                                Icon(
+                                    if (duration == null) Icons.Outlined.NotificationsOff else Icons.Outlined.Timer,
+                                    contentDescription = null
+                                )
+                            },
                             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                            modifier = Modifier.clickable {
-                                onMute(duration?.let { System.currentTimeMillis() + it } ?: Long.MAX_VALUE)
-                                showMuteDialog = false
-                            }
+                            modifier = Modifier
+                                .clip(MaterialTheme.shapes.medium)
+                                .clickable {
+                                    onMute(duration?.let { System.currentTimeMillis() + it } ?: Long.MAX_VALUE)
+                                    showMuteDialog = false
+                                }
                         )
                     }
                 }
@@ -461,11 +445,14 @@ private fun ApplicationCard(
             onDismissRequest = { showClearConfirm = false },
             icon = { Icon(Icons.Outlined.ClearAll, null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("Clear ${application.name} messages?") },
-            text = { Text("All cached and server messages from this application will be deleted.") },
+            text = { Text("Every message from this application will be deleted from the server and this device.") },
             confirmButton = {
                 Button(
                     onClick = { onClearMessages(); showClearConfirm = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text("Clear messages") }
             },
             dismissButton = {
@@ -488,7 +475,28 @@ private fun ApplicationCard(
     }
 }
 
-
+@Composable
+private fun ApplicationCardSkeleton() {
+    Card(
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = MaterialTheme.shapes.large,
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Row(
+            modifier              = Modifier.padding(16.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            ShimmerBox(Modifier.size(48.dp), shape = MaterialTheme.shapes.medium)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShimmerBox(Modifier.fillMaxWidth(0.5f).height(14.dp))
+                ShimmerBox(Modifier.fillMaxWidth(0.8f).height(10.dp))
+                ShimmerBox(Modifier.size(width = 90.dp, height = 18.dp), shape = CircleShape)
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -501,36 +509,62 @@ private fun ApplicationEditorSheet(
 ) {
     var name        by remember { mutableStateOf(initialName) }
     var description by remember { mutableStateOf(initialDescription) }
+    val isNew = initialName.isBlank()
+    val canSave = name.isNotBlank() && (isNew || name.trim() != initialName || description.trim() != initialDescription)
+    val nameFocus = remember { FocusRequester() }
+    val save = { if (canSave) onSave(name.trim(), description.trim()) }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // Fully expanded so the keyboard never hides the save button.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp)
+                .padding(bottom = 24.dp)
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (isNew) {
+                    Text(
+                        "Gotify generates a token for this application. Use it in scripts and services to send messages.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
             OutlinedTextField(
                 value = name, onValueChange = { name = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Application name") }, placeholder = { Text("My App") },
-                singleLine = true, shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
+                label = { Text("Name") }, placeholder = { Text("e.g. Home Assistant") },
+                singleLine = true, shape = MaterialTheme.shapes.medium,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next)
             )
             OutlinedTextField(
                 value = description, onValueChange = { description = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Description (optional)") },
-                maxLines = 3, shape = RoundedCornerShape(12.dp)
+                maxLines = 3, shape = MaterialTheme.shapes.medium,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { save() })
             )
-            Button(
-                onClick  = { if (name.isNotBlank()) onSave(name.trim(), description.trim()) },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                enabled  = name.isNotBlank(),
-                shape    = RoundedCornerShape(12.dp)
-            ) { Text(if (initialName.isBlank()) "Create application" else "Save changes", fontWeight = FontWeight.SemiBold) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)
+            ) {
+                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") }
+                Button(
+                    onClick  = { save() },
+                    enabled  = canSave,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) { Text(if (isNew) "Create" else "Save") }
+            }
         }
     }
+    LaunchedEffect(Unit) { if (isNew) nameFocus.requestFocus() }
 }

@@ -30,6 +30,13 @@ import java.net.URI
 import java.time.temporal.ChronoUnit
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.lazy.LazyListState
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
@@ -89,6 +96,7 @@ fun AppIcon(
     val hue     = (appName.hashCode().and(0x7FFFFFFF) % 360).toFloat()
     val bgColor = Color.hsl(hue, 0.55f, 0.38f)
     val initial = appName.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+    val initialSize = with(LocalDensity.current) { (size * 0.42f).toSp() }
 
     Box(
         modifier         = modifier
@@ -102,7 +110,8 @@ fun AppIcon(
             text       = initial,
             color      = Color.White,
             fontWeight = FontWeight.Bold,
-            fontSize   = (size.value * 0.38f).sp
+            fontSize   = initialSize,
+            lineHeight = initialSize
         )
 
         // Image layer — only renders if the URL is non-empty AND loads successfully
@@ -209,14 +218,18 @@ fun dayLabel(isoDate: String, today: java.time.LocalDate = java.time.LocalDate.n
     }
 }
 
+/** Opaque so it can be pinned with `stickyHeader` without cards showing through. */
 @Composable
 fun DateHeader(label: String, modifier: Modifier = Modifier) {
     Text(
         text       = label,
-        style      = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
+        style      = MaterialTheme.typography.labelLarge,
         color      = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier   = modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp)
+        modifier   = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(start = 4.dp, top = 10.dp, bottom = 6.dp)
+            .semantics { heading() }
     )
 }
 
@@ -311,18 +324,26 @@ fun MessageCard(
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        // Name + time take the free space so the badge and unread dot stay pinned to the end.
+                        Row(
+                            modifier              = Modifier.weight(1f),
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                         Text(
                             text       = appName,
                             style      = MaterialTheme.typography.labelLarge,
-                            color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color      = if (isRead) MaterialTheme.colorScheme.onSurfaceVariant
+                                         else MaterialTheme.colorScheme.primary,
                             maxLines   = 1,
                             overflow   = TextOverflow.Ellipsis,
                             modifier   = Modifier.weight(1f, fill = false)
                         )
-                        Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("·", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         RelativeTime(isoDate = date)
-                        Spacer(Modifier.weight(1f))
-                        PriorityBadge(priority = priority)
+                        }
+                        // Every Gotify message has a priority; in a list only "High" is worth the ink.
+                        if (priority >= 8) PriorityBadge(priority = priority)
                         if (!isRead) {
                             Box(
                                 Modifier
@@ -334,7 +355,7 @@ fun MessageCard(
                         }
                     }
                     if (title.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(2.dp))
                         Text(
                             text       = title,
                             style      = MaterialTheme.typography.titleMedium,
@@ -346,7 +367,7 @@ fun MessageCard(
                     }
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text     = message,
+                        text     = remember(message) { previewText(message) },
                         style    = MaterialTheme.typography.bodyMedium,
                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
@@ -357,6 +378,26 @@ fun MessageCard(
         }
     }
 }
+
+private val MD_IMAGE   = Regex("""!\[([^\]]*)]\([^)]*\)""")
+private val MD_LINK    = Regex("""\[([^\]]+)]\([^)]*\)""")
+private val MD_EMPH    = Regex("""(\*\*|__|~~|`)""")
+private val MD_HEADING = Regex("""(?m)^\s{0,3}#{1,6}\s+""")
+private val MD_BULLET  = Regex("""(?m)^\s*[-*+]\s+""")
+private val WHITESPACE = Regex("""\s+""")
+
+/**
+ * One-line list preview: drops common Markdown markup (bold, links, headings, bullets) and
+ * collapses line breaks, so previews read as text rather than syntax.
+ */
+fun previewText(raw: String): String = raw
+    .replace(MD_IMAGE) { it.groupValues[1] }
+    .replace(MD_LINK) { it.groupValues[1] }
+    .replace(MD_HEADING, "")
+    .replace(MD_BULLET, "• ")
+    .replace(MD_EMPH, "")
+    .replace(WHITESPACE, " ")
+    .trim()
 
 internal fun shouldAttachGotifyKey(imageUrl: String, token: String, authBaseUrl: String): Boolean {
     if (token.isBlank() || authBaseUrl.isBlank()) return false
@@ -410,26 +451,50 @@ fun EmptyState(
     action:   (@Composable () -> Unit)? = null
 ) {
     Column(
-        modifier              = modifier.padding(32.dp),
-        horizontalAlignment   = Alignment.CenterHorizontally,
-        verticalArrangement   = Arrangement.spacedBy(12.dp)
+        modifier              = modifier
+            .widthIn(max = 360.dp)
+            .padding(32.dp),
+        horizontalAlignment   = Alignment.CenterHorizontally
     ) {
-        Icon(
-            imageVector        = icon,
-            contentDescription = null,
-            modifier           = Modifier.size(56.dp),
-            tint               = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+        Box(
+            modifier         = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector        = icon,
+                contentDescription = null,
+                modifier           = Modifier.size(32.dp),
+                tint               = MaterialTheme.colorScheme.primary
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text      = title,
+            style     = MaterialTheme.typography.titleMedium,
+            color     = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
         )
-        Text(text = title,    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(text = subtitle, style = MaterialTheme.typography.bodyMedium,  color = MaterialTheme.colorScheme.onSurfaceVariant)
-        action?.invoke()
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text      = subtitle,
+            style     = MaterialTheme.typography.bodyMedium,
+            color     = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        if (action != null) {
+            Spacer(Modifier.height(20.dp))
+            action()
+        }
     }
 }
 
 // ─── Loading Shimmer ──────────────────────────────────────────────────────────
 
 @Composable
-fun ShimmerBox(modifier: Modifier = Modifier) {
+fun ShimmerBox(modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(6.dp)) {
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.3f,
@@ -442,8 +507,8 @@ fun ShimmerBox(modifier: Modifier = Modifier) {
     )
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f + 0.08f * alpha))
     )
 }
 
@@ -455,26 +520,100 @@ fun MessageCardSkeleton(modifier: Modifier = Modifier) {
         colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment     = Alignment.CenterVertically
+        Row(
+            modifier              = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ShimmerBox(Modifier.size(40.dp), shape = MaterialTheme.shapes.medium)
+            Column(
+                modifier            = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ShimmerBox(Modifier.size(40.dp).clip(MaterialTheme.shapes.medium))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ShimmerBox(Modifier.size(width = 80.dp, height = 10.dp))
-                    ShimmerBox(Modifier.size(width = 50.dp, height = 8.dp))
-                }
+                ShimmerBox(Modifier.size(width = 120.dp, height = 10.dp))
+                ShimmerBox(Modifier.fillMaxWidth(0.6f).height(14.dp))
+                ShimmerBox(Modifier.fillMaxWidth().height(10.dp))
+                ShimmerBox(Modifier.fillMaxWidth(0.8f).height(10.dp))
             }
-            Spacer(Modifier.height(12.dp))
-            ShimmerBox(Modifier.fillMaxWidth().height(12.dp))
-            Spacer(Modifier.height(6.dp))
-            ShimmerBox(Modifier.fillMaxWidth(0.7f).height(12.dp))
-            Spacer(Modifier.height(6.dp))
-            ShimmerBox(Modifier.fillMaxWidth(0.5f).height(12.dp))
         }
     }
 }
+
+// ─── Info chip ───────────────────────────────────────────────────────────────
+
+/** Small tonal pill for metadata (counts, states) so every screen uses the same treatment. */
+@Composable
+fun InfoChip(
+    text:           String,
+    modifier:       Modifier = Modifier,
+    icon:           ImageVector? = null,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    contentColor:   Color = MaterialTheme.colorScheme.onSurfaceVariant
+) {
+    Surface(modifier = modifier, shape = CircleShape, color = containerColor, contentColor = contentColor) {
+        Row(
+            modifier              = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(12.dp))
+            Text(text, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        }
+    }
+}
+
+// ─── Lists ───────────────────────────────────────────────────────────────────
+
+/**
+ * Lets a horizontally scrolling row inside a padded list run to the screen edges,
+ * so chips scroll off the edge instead of being clipped at the list padding.
+ */
+fun Modifier.horizontalBleed(bleed: Dp): Modifier = layout { measurable, constraints ->
+    val extra = (bleed * 2).roundToPx()
+    val placeable = measurable.measure(
+        constraints.copy(
+            minWidth = constraints.minWidth + extra,
+            maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + extra else constraints.maxWidth
+        )
+    )
+    layout(placeable.width - extra, placeable.height) { placeable.place(-extra / 2, 0) }
+}
+
+/** Calls [onLoadMore] when the user scrolls near the end of the list (infinite scroll). */
+@Composable
+fun LoadMoreEffect(listState: LazyListState, hasMore: Boolean, onLoadMore: () -> Unit, threshold: Int = 6) {
+    val currentLoadMore by rememberUpdatedState(onLoadMore)
+    LaunchedEffect(listState, hasMore) {
+        if (!hasMore) return@LaunchedEffect
+        // Keyed on the item count too, so a page that still leaves us at the end triggers the next one.
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val nearEnd = info.totalItemsCount > 0 && last >= info.totalItemsCount - threshold
+            nearEnd to info.totalItemsCount
+        }
+            .distinctUntilChanged()
+            .filter { (nearEnd, _) -> nearEnd }
+            .collect { currentLoadMore() }
+    }
+}
+
+/** Shown at the end of a paged list while more items exist. */
+@Composable
+fun LoadingMoreIndicator(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.5.dp)
+    }
+}
+
+// ─── Top app bar ─────────────────────────────────────────────────────────────
+
+/** Flat on the page background at rest; tonal once content scrolls beneath it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun gotifyTopAppBarColors(): TopAppBarColors = TopAppBarDefaults.topAppBarColors(
+    containerColor         = MaterialTheme.colorScheme.background,
+    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+)
 
 // ─── Undoable delete ─────────────────────────────────────────────────────────
 

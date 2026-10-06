@@ -10,16 +10,20 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.gotify.client.data.model.*
 import com.gotify.client.ui.components.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     messages:            List<GotifyMessage>,
@@ -59,9 +63,12 @@ fun HomeScreen(
     val sections = remember(messages) { messages.groupBy { dayLabel(it.date) } }
 
     val pullRefreshState = rememberPullToRefreshState()
+    val listState        = rememberLazyListState()
+    val scrollBehavior   = TopAppBarDefaults.pinnedScrollBehavior()
+    LoadMoreEffect(listState, hasMorePages && !isLoading, onLoadMore)
 
     Scaffold(
-        modifier       = modifier,
+        modifier       = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost   = { SnackbarHost(snackbarHostState) },
         topBar         = {
             HomeTopBar(
@@ -71,7 +78,8 @@ fun HomeScreen(
                 onOpenSearch     = onOpenSearch,
                 onDeleteAll      = { showDeleteAllDialog = true },
                 unreadCount      = unreadCount,
-                onMarkAllAsRead  = onMarkAllAsRead
+                onMarkAllAsRead  = onMarkAllAsRead,
+                scrollBehavior   = scrollBehavior
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -84,33 +92,35 @@ fun HomeScreen(
             modifier     = Modifier.fillMaxSize().padding(paddingValues)
         ) {
             LazyColumn(
+                state               = listState,
                 modifier            = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 960.dp)
+                    .fillMaxSize()
+                    .widthIn(max = 840.dp)
                     .align(Alignment.TopCenter),
-                contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                contentPadding      = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
 
                 item(key = "summary") {
                     HomeSummaryCard(
-                        unreadCount = unreadCount,
-                        cachedCount = cachedMessageCount,
-                        connectionStatus = connectionStatus,
-                        cacheSyncTruncated = cacheSyncTruncated
+                        unreadCount        = unreadCount,
+                        cachedCount        = cachedMessageCount,
+                        connectionStatus   = connectionStatus,
+                        cacheSyncTruncated = cacheSyncTruncated,
+                        onMarkAllAsRead    = onMarkAllAsRead
                     )
                 }
 
                 errorMessage?.let { error ->
                     item(key = "sync_error") {
                         Surface(
-                            shape = MaterialTheme.shapes.medium,
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            modifier = Modifier.fillMaxWidth()
+                            shape    = MaterialTheme.shapes.large,
+                            color    = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.fillMaxWidth().animateItem()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                modifier              = Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                                verticalAlignment     = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Icon(
@@ -120,27 +130,31 @@ fun HomeScreen(
                                 )
                                 Text(
                                     error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style    = MaterialTheme.typography.bodySmall,
+                                    color    = MaterialTheme.colorScheme.onErrorContainer,
                                     modifier = Modifier.weight(1f)
                                 )
-                                TextButton(onClick = onRefresh) { Text("Retry") }
+                                TextButton(
+                                    onClick = onRefresh,
+                                    colors  = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                                ) { Text("Retry") }
                             }
                         }
                     }
                 }
 
-                // Filter chips
-                if (applications.isNotEmpty()) {
+                // Filter chips — shown whenever there is something to filter, or a filter is active
+                if (applications.isNotEmpty() || unreadOnly) {
                     item(key = "filter_chips") {
                         AppFilterChips(
-                            applications  = applications,
-                            clientToken   = clientToken,
-                            authBaseUrl   = serverBaseUrl,
-                            selectedAppId = selectedAppId,
-                            unreadOnly    = unreadOnly,
+                            applications   = applications,
+                            clientToken    = clientToken,
+                            authBaseUrl    = serverBaseUrl,
+                            selectedAppId  = selectedAppId,
+                            unreadOnly     = unreadOnly,
                             onToggleUnread = onToggleUnread,
-                            onSelectApp   = onSelectApp
+                            onSelectApp    = onSelectApp,
+                            modifier       = Modifier.horizontalBleed(16.dp)
                         )
                     }
                 }
@@ -153,24 +167,41 @@ fun HomeScreen(
                 // Empty state
                 if (!isLoading && messages.isEmpty()) {
                     item(key = "empty") {
+                        val filtered = unreadOnly || selectedAppId != null
                         // Not fillParentMaxSize: the summary card above would push it into a pointless scroll.
-                        Box(Modifier.fillParentMaxWidth().padding(top = 48.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.fillParentMaxWidth().padding(top = 24.dp), contentAlignment = Alignment.Center) {
                             EmptyState(
-                                icon     = Icons.Outlined.NotificationsNone,
+                                icon     = when {
+                                    unreadOnly            -> Icons.Outlined.DoneAll
+                                    selectedAppId != null -> Icons.Outlined.FilterAltOff
+                                    else                  -> Icons.Outlined.NotificationsNone
+                                },
                                 title    = when {
                                     unreadOnly            -> "You're all caught up"
                                     selectedAppId != null -> "No messages from this app"
                                     else                  -> "No messages yet"
                                 },
-                                subtitle = "Messages from your Gotify server will appear here"
+                                subtitle = when {
+                                    unreadOnly            -> "There are no unread messages here."
+                                    selectedAppId != null -> "Messages this app sends will show up here."
+                                    else                  -> "Messages from your Gotify server will appear here as they arrive."
+                                },
+                                action   = if (filtered) {
+                                    {
+                                        FilledTonalButton(onClick = {
+                                            if (unreadOnly) onToggleUnread()
+                                            if (selectedAppId != null) onSelectApp(null)
+                                        }) { Text("Show all messages") }
+                                    }
+                                } else null
                             )
                         }
                     }
                 }
 
                 sections.forEach { (label, dayMessages) ->
-                    item(key = "header_$label") {
-                        DateHeader(label, Modifier.animateItem())
+                    stickyHeader(key = "header_$label") {
+                        DateHeader(label)
                     }
                     items(dayMessages, key = { it.id }) { message ->
                         val app = appMap[message.appId]
@@ -191,17 +222,9 @@ fun HomeScreen(
                     }
                 }
 
-                if (hasMorePages && !isLoading) {
-                    item(key = "load_more") {
-                        OutlinedButton(
-                            onClick  = onLoadMore,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            shape    = RoundedCornerShape(12.dp)
-                        ) { Text("Load more messages") }
-                    }
+                if (hasMorePages && !isLoading && messages.isNotEmpty()) {
+                    item(key = "load_more") { LoadingMoreIndicator() }
                 }
-
-                item { Spacer(Modifier.height(80.dp)) }
             }
         }
     }
@@ -211,11 +234,14 @@ fun HomeScreen(
             onDismissRequest = { showDeleteAllDialog = false },
             icon    = { Icon(Icons.Outlined.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
             title   = { Text("Delete all messages?") },
-            text    = { Text("This will permanently delete all messages across all applications.") },
+            text    = { Text("This permanently deletes every message from every application on this server. It can't be undone.") },
             confirmButton = {
                 Button(
                     onClick = { onDeleteAllMessages(); showDeleteAllDialog = false },
-                    colors  = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors  = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor   = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text("Delete all") }
             },
             dismissButton = { TextButton(onClick = { showDeleteAllDialog = false }) { Text("Cancel") } }
@@ -229,79 +255,73 @@ private fun HomeSummaryCard(
     cachedCount: Int,
     connectionStatus: ConnectionStatus,
     cacheSyncTruncated: Boolean,
+    onMarkAllAsRead: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val connectionLabel = when (connectionStatus) {
-        ConnectionStatus.CONNECTED -> "Live"
-        ConnectionStatus.CONNECTING -> "Connecting"
-        ConnectionStatus.ERROR -> "Connection issue"
+        ConnectionStatus.CONNECTED    -> "Live"
+        ConnectionStatus.CONNECTING   -> "Connecting"
+        ConnectionStatus.ERROR        -> "Connection issue"
         ConnectionStatus.DISCONNECTED -> "Offline"
     }
+    val onContainer = MaterialTheme.colorScheme.onPrimaryContainer
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.primaryContainer
+        shape    = MaterialTheme.shapes.extraLarge,
+        color    = MaterialTheme.colorScheme.primaryContainer
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier            = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier          = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.Notifications,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(18.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text  = if (unreadCount == 0) "All caught up" else "$unreadCount unread",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = onContainer
                     )
                     Text(
-                        "Live stream",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontWeight = FontWeight.SemiBold
+                        text  = "$cachedCount message${if (cachedCount == 1) "" else "s"} on this device",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = onContainer.copy(alpha = 0.78f)
                     )
                 }
                 Surface(
-                    shape = MaterialTheme.shapes.extraSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f)
+                    shape    = CircleShape,
+                    color    = onContainer.copy(alpha = 0.10f),
+                    modifier = Modifier.semantics { contentDescription = "Connection: $connectionLabel" }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        modifier              = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         ConnectionDot(connectionStatus)
-                        Text(
-                            connectionLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                        Text(connectionLabel, style = MaterialTheme.typography.labelMedium, color = onContainer)
                     }
                 }
             }
-            Text(
-                text = if (unreadCount == 0) "All clear" else "$unreadCount to review",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "$cachedCount cached message${if (cachedCount == 1) "" else "s"}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
-            )
+            AnimatedVisibility(visible = unreadCount > 0) {
+                TextButton(
+                    onClick        = onMarkAllAsRead,
+                    contentPadding = PaddingValues(horizontal = 0.dp),
+                    colors         = ButtonDefaults.textButtonColors(contentColor = onContainer)
+                ) {
+                    Icon(Icons.Outlined.DoneAll, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Mark all as read")
+                }
+            }
             if (cacheSyncTruncated) {
                 Text(
-                    "Sync reached the history safety limit; older messages may not be cached.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
+                    "Sync reached the history limit; older messages may not be cached.",
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = onContainer.copy(alpha = 0.72f),
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
         }
@@ -319,122 +339,136 @@ private fun HomeTopBar(
     onOpenSearch:     () -> Unit,
     onDeleteAll:      () -> Unit,
     unreadCount:      Int,
-    onMarkAllAsRead:  () -> Unit
+    onMarkAllAsRead:  () -> Unit,
+    scrollBehavior:   TopAppBarScrollBehavior
 ) {
     var showMenu by remember { mutableStateOf(false) }
     TopAppBar(
         title = {
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                modifier              = Modifier.clickable(onClick = onOpenServers)
-            ) {
-                Column {
-                    Text(
-                        "Messages",
-                        style      = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+            // Tappable server switcher with a proper touch target and ripple bounds.
+            Column(
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .clickable(
+                        onClickLabel = "Switch server",
+                        role         = Role.Button,
+                        onClick      = onOpenServers
                     )
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        ConnectionDot(status = connectionStatus)
-                        Text(
-                            text     = serverName,
-                            style    = MaterialTheme.typography.labelSmall,
-                            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Icon(
-                            Icons.Outlined.UnfoldMore, null,
-                            modifier = Modifier.size(12.dp),
-                            tint     = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            ) {
+                Text("Messages", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    ConnectionDot(status = connectionStatus)
+                    Text(
+                        text     = serverName,
+                        style    = MaterialTheme.typography.labelMedium,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Icon(
+                        Icons.Outlined.UnfoldMore, null,
+                        modifier = Modifier.size(14.dp),
+                        tint     = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         },
         actions = {
-                IconButton(onClick = onOpenSearch) { Icon(Icons.Outlined.Search, "Search") }
-                Box {
-                    IconButton(onClick = { showMenu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+            IconButton(onClick = onOpenSearch) { Icon(Icons.Outlined.Search, "Search messages") }
+            Box {
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Outlined.MoreVert, "More options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    if (unreadCount > 0) {
-                        DropdownMenuItem(
-                            text        = { Text("Mark all as read") },
-                            leadingIcon = { Icon(Icons.Outlined.DoneAll, null) },
-                            onClick     = { onMarkAllAsRead(); showMenu = false }
-                        )
-                    }
                     DropdownMenuItem(
-                        text        = { Text("Delete all messages") },
+                        text        = { Text("Mark all as read") },
+                        leadingIcon = { Icon(Icons.Outlined.DoneAll, null) },
+                        enabled     = unreadCount > 0,
+                        onClick     = { onMarkAllAsRead(); showMenu = false }
+                    )
+                    DropdownMenuItem(
+                        text        = { Text("Switch server") },
+                        leadingIcon = { Icon(Icons.Outlined.Dns, null) },
+                        onClick     = { onOpenServers(); showMenu = false }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text        = { Text("Delete all messages", color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
-                            Icon(Icons.Outlined.DeleteSweep, null,
-                                tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Outlined.DeleteSweep, null, tint = MaterialTheme.colorScheme.error)
                         },
-                        onClick = { onDeleteAll(); showMenu = false }
+                        onClick     = { onDeleteAll(); showMenu = false }
                     )
                 }
             }
         },
-        expandedHeight = 56.dp,
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.background
-        )
+        colors         = gotifyTopAppBarColors(),
+        scrollBehavior = scrollBehavior
     )
 }
 
-// ─── App Filter Chips — now fully controlled (no internal state) ──────────────
+// ─── App Filter Chips — fully controlled (no internal state) ──────────────────
 
 @Composable
 private fun AppFilterChips(
-    applications:  List<GotifyApplication>,
-    clientToken:   String,
-    authBaseUrl:   String,
-    selectedAppId: Int?,          // ← controlled by parent
-    unreadOnly:    Boolean,
+    applications:   List<GotifyApplication>,
+    clientToken:    String,
+    authBaseUrl:    String,
+    selectedAppId:  Int?,
+    unreadOnly:     Boolean,
     onToggleUnread: () -> Unit,
-    onSelectApp:   (Int?) -> Unit  // ← parent decides toggle logic
+    onSelectApp:    (Int?) -> Unit,
+    modifier:       Modifier = Modifier
 ) {
-    Row(
-        modifier              = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    LazyRow(
+        modifier              = modifier,
+        contentPadding        = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment     = Alignment.CenterVertically
     ) {
-        FilterChip(
-            selected = selectedAppId == null,
-            onClick = { onSelectApp(null) },
-            label = { Text("All") },
-            leadingIcon = {
-                Icon(Icons.Outlined.AllInbox, contentDescription = null, modifier = Modifier.size(18.dp))
-            },
-            shape = RoundedCornerShape(8.dp)
-        )
-        FilterChip(
-            selected = unreadOnly,
-            onClick = onToggleUnread,
-            label = { Text("Unread") },
-            leadingIcon = {
-                Icon(Icons.Outlined.MarkEmailUnread, contentDescription = null, modifier = Modifier.size(18.dp))
-            },
-            shape = RoundedCornerShape(8.dp)
-        )
-        applications.forEach { app ->
-            val isSelected = selectedAppId == app.id
+        // "Unread" is an independent toggle; keep it visually apart from the single-choice app filter.
+        item(key = "unread") {
             FilterChip(
-                selected    = isSelected,
+                selected    = unreadOnly,
+                onClick     = onToggleUnread,
+                label       = { Text("Unread") },
+                leadingIcon = {
+                    Icon(
+                        if (unreadOnly) Icons.Outlined.Check else Icons.Outlined.MarkEmailUnread,
+                        contentDescription = null,
+                        modifier = Modifier.size(FilterChipDefaults.IconSize)
+                    )
+                }
+            )
+        }
+        item(key = "divider") {
+            VerticalDivider(Modifier.height(24.dp).padding(horizontal = 4.dp))
+        }
+        item(key = "all") {
+            FilterChip(
+                selected = selectedAppId == null,
+                onClick  = { onSelectApp(null) },
+                label    = { Text("All apps") }
+            )
+        }
+        items(applications, key = { "app_${it.id}" }) { app ->
+            FilterChip(
+                selected    = selectedAppId == app.id,
                 onClick     = { onSelectApp(app.id) },
-                label       = { Text(app.name, style = MaterialTheme.typography.labelMedium) },
+                label       = { Text(app.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 leadingIcon = {
                     AppIcon(
                         imageUrl    = app.image,
                         appName     = app.name,
                         clientToken = clientToken,
                         authBaseUrl = authBaseUrl,
-                        size        = 18.dp
+                        size        = 20.dp,
+                        modifier    = Modifier.clip(CircleShape)
                     )
-                },
-                shape = RoundedCornerShape(8.dp)
+                }
             )
         }
     }

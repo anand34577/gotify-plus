@@ -10,30 +10,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
-
-
-
 val GotifyBlue        = Color(0xFF55B7FF)
 val GotifyBlueDark    = Color(0xFF0068B7)
 val GotifyBlueLight   = Color(0xFF9DD5FF)
-
 
 val SurfaceDark       = Color(0xFF0B1220)
 val SurfaceDark2      = Color(0xFF131C2D)
 val SurfaceDark3      = Color(0xFF1D2A40)
 val SurfaceBorder     = Color(0xFF33445F)
 
-
 val AccentGreen       = Color(0xFF40C49D)
 val AccentOrange      = Color(0xFFD88921)
 val AccentRed         = Color(0xFFE2535F)
 val AccentPurple      = Color(0xFFD7A8FF)
-
-
 
 private val DarkColorScheme = darkColorScheme(
     primary            = GotifyBlue,
@@ -47,7 +41,9 @@ private val DarkColorScheme = darkColorScheme(
     onSecondaryContainer = Color(0xFFCDD9E5),
 
     tertiary           = AccentPurple,
-    onTertiary         = Color.Black,
+    onTertiary         = Color(0xFF3B1660),
+    tertiaryContainer  = Color(0xFF2E2147),
+    onTertiaryContainer = Color(0xFFEBD7FF),
 
     background         = SurfaceDark,
     onBackground       = Color(0xFFE6EDF3),
@@ -55,11 +51,14 @@ private val DarkColorScheme = darkColorScheme(
     surface            = SurfaceDark2,
     onSurface          = Color(0xFFE6EDF3),
     surfaceVariant     = SurfaceDark3,
-    onSurfaceVariant   = Color(0xFF8B949E),
+    onSurfaceVariant   = Color(0xFF9AA7B8),
     surfaceTint        = GotifyBlue,
+    inverseSurface     = Color(0xFFE6EDF3),
+    inverseOnSurface   = Color(0xFF131C2D),
+    inversePrimary     = GotifyBlueDark,
 
-    outline            = SurfaceBorder,
-    outlineVariant     = Color(0xFF21262D),
+    outline            = Color(0xFF5B6B84),
+    outlineVariant     = SurfaceBorder,
 
     surfaceDim              = SurfaceDark,
     surfaceBright           = Color(0xFF26344D),
@@ -71,11 +70,9 @@ private val DarkColorScheme = darkColorScheme(
 
     error              = AccentRed,
     onError            = Color.White,
-    errorContainer     = Color(0xFF3D1A1A),
-    onErrorContainer   = Color(0xFFFFB3B3),
+    errorContainer     = Color(0xFF4A1C22),
+    onErrorContainer   = Color(0xFFFFD9DC),
 )
-
-
 
 private val LightColorScheme = lightColorScheme(
     primary            = GotifyBlueDark,
@@ -90,6 +87,8 @@ private val LightColorScheme = lightColorScheme(
 
     tertiary           = Color(0xFF7A4FB0),
     onTertiary         = Color.White,
+    tertiaryContainer  = Color(0xFFF0E3FF),
+    onTertiaryContainer = Color(0xFF2E0F55),
 
     background         = Color(0xFFF5F7FB),
     onBackground       = Color(0xFF24292F),
@@ -99,26 +98,34 @@ private val LightColorScheme = lightColorScheme(
     surfaceVariant     = Color(0xFFEEF2F9),
     onSurfaceVariant   = Color(0xFF57606A),
 
-    outline            = Color(0xFFD0D7DE),
-    outlineVariant     = Color(0xFFE3E8EF),
+    outline            = Color(0xFF8C959F),
+    outlineVariant     = Color(0xFFD8DEE6),
+
+    error              = Color(0xFFC62B3A),
+    onError            = Color.White,
+    errorContainer     = Color(0xFFFFE3E5),
+    onErrorContainer   = Color(0xFF5C0A14),
 
     surfaceDim              = Color(0xFFDCE2EB),
     surfaceBright           = Color.White,
     surfaceContainerLowest  = Color.White,
-    surfaceContainerLow     = Color(0xFFF9FBFE),
+    surfaceContainerLow     = Color(0xFFFAFBFD),
     surfaceContainer        = Color.White,
     surfaceContainerHigh    = Color(0xFFEDF1F7),
     surfaceContainerHighest = Color(0xFFE4E9F1),
 )
 
-
+private val BaseTypography = Typography()
 
 val GotifyTypography = Typography(
-    headlineSmall = Typography().headlineSmall.copy(letterSpacing = (-0.25).sp),
-    titleLarge = Typography().titleLarge.copy(letterSpacing = (-0.15).sp),
-    titleMedium = Typography().titleMedium.copy(letterSpacing = 0.sp),
-    bodyLarge = Typography().bodyLarge.copy(lineHeight = 25.sp),
-    bodyMedium = Typography().bodyMedium.copy(lineHeight = 21.sp)
+    headlineMedium = BaseTypography.headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
+    headlineSmall  = BaseTypography.headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.25).sp),
+    titleLarge     = BaseTypography.titleLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.15).sp),
+    titleMedium    = BaseTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+    titleSmall     = BaseTypography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+    bodyLarge      = BaseTypography.bodyLarge.copy(lineHeight = 25.sp),
+    bodyMedium     = BaseTypography.bodyMedium.copy(lineHeight = 21.sp),
+    labelLarge     = BaseTypography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
 )
 
 val GotifyShapes = Shapes(
@@ -128,8 +135,6 @@ val GotifyShapes = Shapes(
     large = RoundedCornerShape(20.dp),
     extraLarge = RoundedCornerShape(28.dp)
 )
-
-
 
 @Composable
 fun GotifyTheme(
@@ -146,7 +151,6 @@ fun GotifyTheme(
         darkTheme -> DarkColorScheme
         else      -> LightColorScheme
     }
-
 
     val view = LocalView.current
     if (!view.isInEditMode) {
